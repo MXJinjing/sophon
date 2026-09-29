@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sophon-client"
+version = "0.1.0"
+description = "Minimal Python CLI for Sophon game downloads and maintenance"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+sophon-client = "sophon_client.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sophon_client*"]
