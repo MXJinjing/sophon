@@ -432,3 +432,19 @@ uv run --project sophon-client --locked python test.py --component client --patt
 ```
 
 这里只选择两个小型测试文件。HTTP 集成测试需要服务端依赖；渲染测试需要 Rich。构建、缓存、虚拟环境和下载文件均不提交。原构建脚本仅作为归档文档保留。
+
+
+## 16. GitHub 自动发布
+
+推送 `vX.Y.Z` 标签触发 `.github/workflows/release.yml`：先运行服务端和客户端测试，再构建 Linux x64、Windows x64、macOS x64/arm64 服务端及客户端 wheel/sdist。每个服务端产物通过 `/health` 启动检查后，打包完整 `server.dist` 目录（含运行库、hpatchz 和许可证）；所有构建成功后统一创建 GitHub Release，附带四个平台的压缩包、客户端包和 `SHA256SUMS`。
+
+标签也支持 `vX.Y.Z-alpha`、`vX.Y.Z-beta.N`、`vX.Y.Z-rcN`，这些版本发布为 Prerelease。客户端包版本在构建工作区内根据标签转换成 PEP 440 格式，例如 `v0.9.0-alpha` 对应 `0.9.0a0`，不会回写仓库版本号。
+
+发布已提交并推送的代码时：
+
+```sh
+git tag -a v0.9.0-alpha -m "v0.9.0-alpha"
+git push origin v0.9.0-alpha
+```
+
+GitHub Actions 页面也可手动运行此 workflow 来测试编译和下载产物；手动运行不会发布 Release。发布使用内置 `GITHUB_TOKEN`，只有发布任务授予 `contents: write`，无需额外配置个人令牌。已有 Release 的成功重跑会替换对应附件。

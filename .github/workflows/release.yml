@@ -1,0 +1,154 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test and validate version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: Validate release tag
+        id: version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python .github/scripts/release-assets.py metadata --tag "$RELEASE_TAG" --output "$GITHUB_OUTPUT"
+      - name: Install test dependencies from both locks
+        run: |
+          uv sync --project sophon-server --locked --python 3.13
+          uv export --project sophon-client --locked --no-dev --no-emit-project --output-file "$RUNNER_TEMP/client-requirements.txt"
+          uv pip install --python sophon-server/.venv/bin/python --requirement "$RUNNER_TEMP/client-requirements.txt"
+      - name: Run server and client tests
+        env:
+          SOPHON_MANIFEST_CACHE: ${{ runner.temp }}/sophon-test-manifests
+        run: |
+          sophon-server/.venv/bin/python test.py --component server
+          sophon-server/.venv/bin/python test.py --component client
+
+  server:
+    name: Server (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+          - os: windows-2022
+            platform: win32
+            arch: x64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+          - os: macos-15
+            platform: darwin
+            arch: arm64
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: Install native Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes build-essential patchelf
+      - name: Install locked server dependencies
+        run: uv sync --project sophon-server --locked --python 3.13
+      - name: Build standalone server
+        run: uv run --project sophon-server --locked python build.py --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - name: Verify compiled server startup
+        run: python .github/scripts/release-assets.py smoke --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - name: Package full standalone distribution
+        run: python .github/scripts/release-assets.py archive --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: server-${{ matrix.platform }}-${{ matrix.arch }}
+          path: dist/sophon-server-*
+          if-no-files-found: error
+          retention-days: 7
+
+  client:
+    name: Client wheel and source distribution
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - name: Set package version from tag
+        if: needs.test.outputs.version != ''
+        env:
+          CLIENT_VERSION: ${{ needs.test.outputs.version }}
+        run: python .github/scripts/release-assets.py client-version --version "$CLIENT_VERSION"
+      - name: Build client packages
+        run: python build-client.py
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: client-packages
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [test, server, client]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate asset checksums
+        run: python .github/scripts/release-assets.py checksums --directory release-assets
+      - name: Create release or update assets on rerun
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.test.outputs.prerelease }}
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          else
+            flags=()
+            if [[ "$PRERELEASE" == "true" ]]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" release-assets/* --verify-tag --title "$RELEASE_TAG" --generate-notes "${flags[@]}"
+          fi

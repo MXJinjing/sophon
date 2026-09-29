@@ -54,6 +54,8 @@ uv run --project sophon-server --locked python build.py --generate-only
 
 protoc 存于根目录 .cache/protoc，产物位于 build/<platform>-<arch>/server.dist，分发时需要整个目录。hpatchz 已内置 Windows x64、Linux x64、macOS arm64/x64，其他架构需自行提供；历史 chunk 接口不依赖 hpatchz，旧 ldiff 接口需要。Windows/Linux 原生构建尚未实际完成验证，仍需编译器和适用的 pycurl/curl 系统依赖。
 
+推送 `vX.Y.Z` 或受支持的 alpha/beta/rc 标签会触发 GitHub 自动编译与 Release 发布；平台矩阵、包版本和手动编译说明见根目录 README 的「GitHub 自动发布」。
+
 ## 结构和按需验证
 
 src 为服务端源码，proto 为 schemas，tests 为测试；锁文件和 .python-version 位于本组件目录，构建入口位于仓库根目录。仅在需要时运行测试，例如：
