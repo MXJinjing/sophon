@@ -8,7 +8,7 @@ import threading
 import time
 from urllib import request
 
-from history import query_build, version_tuple
+from services.history import query_build, version_tuple
 
 INDEX_URL = 'https://raw.githubusercontent.com/orilights/pkg_version/main/hk4e_versions.json'
 CACHE_SECONDS = 600

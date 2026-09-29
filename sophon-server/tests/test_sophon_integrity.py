@@ -8,7 +8,8 @@ import zstandard
 
 import manifest_ldiff_pb2
 import manifest_pb2
-import sophon_api
+from engine import runtime
+from engine.client import SophonClient
 
 
 def digest(data: bytes) -> str:
@@ -24,17 +25,17 @@ class SophonIntegrityTests(unittest.TestCase):
         self.stage = self.game / ".tmp"
         self.game.mkdir()
         self.stage.mkdir()
-        options = sophon_api.Options()
+        options = runtime.Options()
         options.gamedir = self.game
         options.tempdir = self.stage
         options.repair_mode = "reliable"
-        self.options_patch = patch.object(sophon_api, "OPT", options)
+        self.options_patch = patch.object(runtime, "OPT", options)
         self.options_patch.start()
         self.addCleanup(self.options_patch.stop)
-        self.memory_patch = patch.object(sophon_api, "RUN_MEMORY_HACK", False)
+        self.memory_patch = patch.object(runtime, "RUN_MEMORY_HACK", False)
         self.memory_patch.start()
         self.addCleanup(self.memory_patch.stop)
-        self.client = sophon_api.SophonClient()
+        self.client = SophonClient()
         self.client.installed_ver = "7.0.0"
         self.client.di_chunks.category_json = {"chunk_download": {"url_prefix": "https://example.test"}}
 
@@ -69,7 +70,7 @@ class SophonIntegrityTests(unittest.TestCase):
     def test_predownload_rejects_same_size_wrong_source_without_changing_game(self):
         diff = self.make_diff()
         path = self.write_game(diff.filename, b"bad!")
-        sophon_api.OPT.predownload = True
+        runtime.OPT.predownload = True
         with self.assertRaisesRegex(RuntimeError, "Check Game Integrity"):
             self.client._download_ldiff_file(self.game / "ldiff", diff)
         self.assertEqual(path.read_bytes(), b"bad!")
@@ -78,7 +79,7 @@ class SophonIntegrityTests(unittest.TestCase):
     def test_predownload_skips_file_already_at_target_hash(self):
         diff = self.make_diff()
         self.write_game(diff.filename, b"new!")
-        sophon_api.OPT.predownload = True
+        runtime.OPT.predownload = True
         self.assertIsNone(self.client._download_ldiff_file(self.game / "ldiff", diff))
 
     def test_update_queues_full_file_when_source_hash_is_wrong(self):
@@ -98,7 +99,7 @@ class SophonIntegrityTests(unittest.TestCase):
         self.assertEqual(self.client.new_files_to_download, {diff.filename})
 
         self.client.new_files_to_download.clear()
-        sophon_api.OPT.predownload = True
+        runtime.OPT.predownload = True
         with patch.object(self.client, "_download_file_resume", side_effect=RuntimeError("offline")):
             with self.assertRaisesRegex(RuntimeError, "offline"):
                 self.client._download_ldiff_file(ldiff_dir, diff)
@@ -111,7 +112,7 @@ class SophonIntegrityTests(unittest.TestCase):
         ldiff_dir.mkdir()
         (ldiff_dir / "patch-1").write_bytes(b"patch")
         path.write_bytes(b"bad!")
-        with patch.object(sophon_api, "hpatchz_patch_file") as patcher:
+        with patch.object(runtime, "hpatchz_patch_file") as patcher:
             self.assertFalse(self.client._apply_ldiff_file(ldiff_dir, diff))
         patcher.assert_not_called()
         self.assertEqual(path.read_bytes(), b"bad!")
@@ -128,14 +129,14 @@ class SophonIntegrityTests(unittest.TestCase):
             output.write_bytes(b"bad!")
             return True
 
-        with patch.object(sophon_api, "hpatchz_patch_file", side_effect=bad_output):
+        with patch.object(runtime, "hpatchz_patch_file", side_effect=bad_output):
             self.assertFalse(self.client._apply_ldiff_file(ldiff_dir, diff))
         self.assertEqual(path.read_bytes(), b"old!")
         self.assertFalse((self.stage / "patches" / diff.filename).exists())
         self.assertEqual(self.client.new_files_to_download, {diff.filename})
 
         self.client.new_files_to_download.clear()
-        with patch.object(sophon_api, "hpatchz_patch_file", side_effect=RuntimeError("patch failed")):
+        with patch.object(runtime, "hpatchz_patch_file", side_effect=RuntimeError("patch failed")):
             self.assertFalse(self.client._apply_ldiff_file(ldiff_dir, diff))
         self.assertEqual(path.read_bytes(), b"old!")
         self.assertEqual(self.client.new_files_to_download, {diff.filename})
@@ -157,7 +158,7 @@ class SophonIntegrityTests(unittest.TestCase):
             output.write_bytes(b"new!")
             return True
 
-        with patch.object(sophon_api, "hpatchz_patch_file", side_effect=valid_output):
+        with patch.object(runtime, "hpatchz_patch_file", side_effect=valid_output):
             self.assertTrue(self.client._apply_ldiff_file(ldiff_dir, diff))
         self.assertEqual(path.read_bytes(), b"new!")
         self.assertEqual(self.client.new_files_to_download, set())
@@ -200,7 +201,7 @@ class SophonIntegrityTests(unittest.TestCase):
             output.write_bytes(compressed)
 
         with (
-            patch.object(sophon_api, "hpatchz_patch_file", side_effect=bad_output),
+            patch.object(runtime, "hpatchz_patch_file", side_effect=bad_output),
             patch.object(self.client, "_download_file_resume", side_effect=download_chunk),
         ):
             self.client.apply_or_prepare_ldiff_files()
@@ -218,7 +219,7 @@ class SophonIntegrityTests(unittest.TestCase):
         def download_chunk(url, output, _size, **_kwargs):
             output.write_bytes(payloads[url.rsplit("/", 1)[1]])
 
-        sophon_api.OPT.dry_run = True
+        runtime.OPT.dry_run = True
         with patch.object(self.client, "_download_file_resume", side_effect=download_chunk):
             self.client.download_game_file(first)
             self.client.download_game_file(second)
@@ -256,7 +257,7 @@ class SophonIntegrityTests(unittest.TestCase):
         ldiff_dir = self.game / "ldiff"
         ldiff_dir.mkdir()
         (ldiff_dir / "patch-1").write_bytes(b"patch")
-        sophon_api.OPT.predownload = True
+        runtime.OPT.predownload = True
         progress = MagicMock()
         self.client.apply_or_prepare_ldiff_files(progress_handler=progress)
         progress.ldiff_download_summary.assert_called_once_with(total_files=1, total_size=0)

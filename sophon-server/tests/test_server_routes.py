@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 from starlette.routing import Match
 
-import server
-from models import LimitRequest
+import api.server as server
+from api.models import LimitRequest
 
 
 class ServerRouteTests(unittest.TestCase):

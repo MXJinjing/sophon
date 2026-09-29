@@ -2,7 +2,7 @@
 import configparser
 import json
 from pathlib import Path
-from history import version_tuple
+from services.history import version_tuple
 
 
 def directory_status(directory):

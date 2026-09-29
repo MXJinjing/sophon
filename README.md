@@ -385,30 +385,31 @@ list 首次逐个确认全部候选，之后使用服务端十分钟内存缓存
 ```text
 sophon/
   run-client.py / run-server.py
-  build.py / build-sophon.sh / build-sophon.ps1 / build-client.py / test.py
+  build.py / build-client.py / test.py
   sophon-client/
     pyproject.toml / uv.lock / README.md
     src/sophon_client/
     tests/
   sophon-server/
     pyproject.toml / uv.lock / README.md
-    src/ / proto/ / tests/
+    src/
+      server.py              # 源码运行与 Nuitka 入口
+      manifest*_pb2.py       # protobuf 生成文件
+      api/                   # 路由与请求模型
+      services/              # 业务任务与查询
+      engine/                # 清单、下载、差分更新与修复
+      infrastructure/        # 线程、连接、限速与平台适配
+    proto/ / tests/
   third_party/hpatchz/
   docs/build-sophon.original.sh.txt
 ```
 
 源码和测试分开，所有构建脚本位于根目录。完整 API 见 [服务端 README 的 API 参考](sophon-server/README.md#api-参考)。客户端不会创建 registry.json；服务端可在游戏目录中创建 `.sophon` 状态和清单/下载缓存，这是服务端管理目录的一部分。
 
-服务端保留 uv + protoc 31.1 + Nuitka standalone 构建流程。macOS / Linux：
+服务端保留 uv + protoc 31.1 + Nuitka standalone 构建流程。macOS、Linux 和 Windows PowerShell 均在仓库根目录执行：
 
 ```sh
-./build-sophon.sh
-```
-
-Windows PowerShell：
-
-```powershell
-.\build-sophon.ps1
+uv run --project sophon-server --locked python build.py
 ```
 
 配置检查和客户端包构建：

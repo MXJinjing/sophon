@@ -2,11 +2,15 @@ import os
 import threading, os, pathlib, concurrent.futures, re, shutil
 from typing import Dict, Optional, Literal
 
-from progress_handlers import InstallProgressHandler, RepairProgressHandler, UpdateProgressHandler
-from models import InstallRequest, RepairRequest, UpdateRequest, TaskStatus, OnlineGameInfo
-from utils import ConnectionManager
-from sophon_api import Options, SophonClient, compare_game_versions, force_memory_release, RUN_MEMORY_HACK, WORKER_CNT, warnlog, wait_if_paused
-from task_errors import TaskCancelledError
+from services.progress import InstallProgressHandler, RepairProgressHandler, UpdateProgressHandler
+from api.models import InstallRequest, RepairRequest, UpdateRequest, TaskStatus, OnlineGameInfo
+from infrastructure.connections import ConnectionManager
+from engine.client import SophonClient
+from engine.runtime import Options, force_memory_release, RUN_MEMORY_HACK, WORKER_CNT
+from engine.files import compare_game_versions
+from engine.logging import warnlog
+from engine.control import wait_if_paused
+from infrastructure.errors import TaskCancelledError
 
 
 def update_config_ini_version(gamedir: pathlib.Path, version: str):
@@ -32,7 +36,7 @@ def remove_cached_files(tempdir: pathlib.Path):
 def is_predownload_enabled(reltype: str) -> bool:
     """Allow branches with supported Sophon manifest endpoints.
 
-    Bilibili's manifest endpoint is not implemented in ``sophon_api.py`` yet,
+    Bilibili's manifest endpoint is not implemented in ``runtime.py`` yet,
     so it must remain unavailable even though it has a distinct launcher
     branch.
     """

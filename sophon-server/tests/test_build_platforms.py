@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import build
-import runtime_platform as runtime
+import infrastructure.platform as runtime
 
 
 class PlatformBuildTests(unittest.TestCase):

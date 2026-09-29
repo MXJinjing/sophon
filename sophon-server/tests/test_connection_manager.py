@@ -3,9 +3,10 @@ import time
 import unittest
 from unittest.mock import MagicMock
 
-from models import TaskStatus
-from task_errors import TaskCancelledError
-from utils import ConnectionManager, run_task_in_thread
+from api.models import TaskStatus
+from infrastructure.errors import TaskCancelledError
+from infrastructure.connections import ConnectionManager
+from infrastructure.runner import run_task_in_thread
 
 
 def wait_until(predicate, timeout=2.0):

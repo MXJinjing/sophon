@@ -1,7 +1,7 @@
 import threading
 import time
 
-from task_errors import TaskCancelledError
+from infrastructure.errors import TaskCancelledError
 
 
 class RateLimiter:

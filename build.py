@@ -15,7 +15,7 @@ PROJECT = ROOT / 'sophon-server'
 SOURCE = PROJECT / 'src'
 PROTO = PROJECT / 'proto'
 sys.path.insert(0, str(SOURCE))
-from runtime_platform import normalize_arch
+from infrastructure.platform import normalize_arch
 VERSION = '31.1'
 
 

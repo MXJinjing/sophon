@@ -3,8 +3,8 @@ import threading
 import unittest
 from unittest.mock import patch
 from fastapi import HTTPException
-import server
-from models import TaskStatus
+import api.server as server
+from api.models import TaskStatus
 
 class TaskNotFoundTests(unittest.TestCase):
     def test_missing_tasks_return_404_without_changing_events(self):

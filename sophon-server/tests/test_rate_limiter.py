@@ -5,9 +5,10 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-import sophon_api
-from rate_limiter import RateLimiter
-from task_errors import TaskCancelledError
+from engine import downloads, runtime
+from engine.client import SophonClient
+from infrastructure.rate_limiter import RateLimiter
+from infrastructure.errors import TaskCancelledError
 
 
 class RateLimiterTests(unittest.TestCase):
@@ -195,10 +196,10 @@ class RateLimiterTests(unittest.TestCase):
         self.assertIsInstance(result.get("error"), TaskCancelledError)
 
     def test_module_singleton_is_shared(self):
-        import rate_limiter
+        import infrastructure.rate_limiter as rate_limiter
 
         self.assertIsInstance(rate_limiter.limiter, RateLimiter)
-        self.assertIs(sophon_api.limiter, rate_limiter.limiter)
+        self.assertIs(runtime.limiter, rate_limiter.limiter)
 
 
 class DownloadFileResumeTests(unittest.TestCase):
@@ -236,13 +237,13 @@ class DownloadFileResumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             dstfile = pathlib.Path(tmp) / "out.bin"
             with (
-                patch.object(sophon_api.pycurl, "Curl", return_value=curl),
-                patch.object(sophon_api, "limiter") as mock_limiter,
+                patch.object(downloads.pycurl, "Curl", return_value=curl),
+                patch.object(runtime, "limiter") as mock_limiter,
             ):
                 mock_limiter.acquire.side_effect = (
                     lambda n, **_kwargs: acquired.append(n)
                 )
-                sophon_api.SophonClient()._download_file_resume(
+                SophonClient()._download_file_resume(
                     "https://example.com/chunk", dstfile, 13
                 )
                 # The write callback itself returns len(data) (and still
@@ -262,10 +263,10 @@ class DownloadFileResumeTests(unittest.TestCase):
             dstfile = pathlib.Path(tmp) / "out.bin"
             dstfile.write_bytes(b"12345")
             with (
-                patch.object(sophon_api.pycurl, "Curl", return_value=curl),
-                patch.object(sophon_api, "limiter") as mock_limiter,
+                patch.object(downloads.pycurl, "Curl", return_value=curl),
+                patch.object(runtime, "limiter") as mock_limiter,
             ):
-                sophon_api.SophonClient()._download_file_resume(
+                SophonClient()._download_file_resume(
                     "https://example.com/chunk", dstfile, 10
                 )
                 # The RANGE resume header is kept for the existing partial file...
@@ -280,10 +281,10 @@ class DownloadFileResumeTests(unittest.TestCase):
             dstfile.write_bytes(b"complete")
             progress = []
             with (
-                patch.object(sophon_api.pycurl, "Curl") as curl_mock,
-                patch.object(sophon_api, "limiter") as mock_limiter,
+                patch.object(downloads.pycurl, "Curl") as curl_mock,
+                patch.object(runtime, "limiter") as mock_limiter,
             ):
-                sophon_api.SophonClient()._download_file_resume(
+                SophonClient()._download_file_resume(
                     "https://example.com/chunk", dstfile, len(b"complete"),
                     progress_callback=progress.append,
                 )
@@ -298,10 +299,10 @@ class DownloadFileResumeTests(unittest.TestCase):
             dstfile.write_bytes(b"abc")
             progress = []
             with (
-                patch.object(sophon_api.pycurl, "Curl", return_value=curl),
-                patch.object(sophon_api, "limiter"),
+                patch.object(downloads.pycurl, "Curl", return_value=curl),
+                patch.object(runtime, "limiter"),
             ):
-                sophon_api.SophonClient()._download_file_resume(
+                SophonClient()._download_file_resume(
                     "https://example.com/chunk", dstfile, 5,
                     progress_callback=progress.append,
                 )
@@ -312,17 +313,17 @@ class DownloadFileResumeTests(unittest.TestCase):
     def test_transient_curl_error_retries_instead_of_returning(self):
         curl, captured, calls = self._make_curl(response_code=200)
         curl.perform.side_effect = [
-            sophon_api.pycurl.error(7, "first failure"),
-            sophon_api.pycurl.error(7, "second failure"),
+            downloads.pycurl.error(7, "first failure"),
+            downloads.pycurl.error(7, "second failure"),
             None,
         ]
         with tempfile.TemporaryDirectory() as tmp:
             dstfile = pathlib.Path(tmp) / "out.bin"
             with (
-                patch.object(sophon_api.pycurl, "Curl", return_value=curl),
-                patch.object(sophon_api.time, "sleep"),
+                patch.object(downloads.pycurl, "Curl", return_value=curl),
+                patch.object(downloads.time, "sleep"),
             ):
-                sophon_api.SophonClient()._download_file_resume(
+                SophonClient()._download_file_resume(
                     "https://example.com/chunk", dstfile, 1
                 )
         self.assertEqual(curl.perform.call_count, 3)
@@ -338,9 +339,9 @@ class DownloadFileResumeTests(unittest.TestCase):
         curl.perform.side_effect = perform
         with tempfile.TemporaryDirectory() as tmp:
             dstfile = pathlib.Path(tmp) / "out.bin"
-            with patch.object(sophon_api.pycurl, "Curl", return_value=curl):
+            with patch.object(downloads.pycurl, "Curl", return_value=curl):
                 with self.assertRaises(TaskCancelledError):
-                    sophon_api.SophonClient()._download_file_resume(
+                    SophonClient()._download_file_resume(
                         "https://example.com/chunk",
                         dstfile,
                         4,

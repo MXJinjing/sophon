@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-import version_catalog as catalog
+import services.version_catalog as catalog
 
 class VersionCatalogTests(unittest.TestCase):
     def setUp(self):catalog._cache.clear()

@@ -23,7 +23,7 @@ class ClientHTTPTests(unittest.TestCase):
         cls.url = f'http://127.0.0.1:{port}'
         runner = cls.base / 'runner.py'
         runner.write_text('''import copy
-import history
+from services import history, manifest_browser
 from test_history import HistoricalFileTests
 HistoricalFileTests.setUpClass()
 def fixture(region, version=None):
@@ -32,10 +32,12 @@ def fixture(region, version=None):
         raise ValueError('Unavailable fixture version')
     return copy.deepcopy(HistoricalFileTests.builds[version])
 history.query_build = fixture
-import server, uvicorn
+manifest_browser.query_build = fixture
+from api import server
+import uvicorn
 import time
-from sophon_api import wait_if_paused
-from task_errors import TaskCancelledError
+from engine.control import wait_if_paused
+from infrastructure.errors import TaskCancelledError
 original = server.run_history
 def controlled(manager, tasks, task_id, operation, payload, cancel, pause):
     if payload.files != ['control-fixture']:

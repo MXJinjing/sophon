@@ -2,8 +2,8 @@ import threading, queue, asyncio, json, time
 from collections import deque
 from typing import Dict, Any
 from fastapi import WebSocket
-from models import TaskStatus
-from task_errors import TaskCancelledError
+from api.models import TaskStatus
+from infrastructure.errors import TaskCancelledError
 
 class ConnectionManager:
     TERMINAL_MESSAGE_TYPES = {"job_end", "job_error", "error", "completed"}
@@ -141,40 +141,3 @@ class ConnectionManager:
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5.0)
 
-def run_task_in_thread(manager: ConnectionManager, tasks: Dict[str, TaskStatus], task_id: str, operation_func, *args):
-    def task_runner():
-        try:
-            tasks[task_id].status = "running"
-            result = operation_func(*args)
-
-            manager.send_message_threadsafe({
-                "type": "completed",
-                "task_id": task_id,
-                "result": result
-            }, task_id)
-
-            tasks[task_id].result = result
-            tasks[task_id].status = "completed"
-
-        except TaskCancelledError:
-            manager.send_message_threadsafe({
-                "type": "job_error",
-                "task_id": task_id,
-                "error": "cancelled"
-            }, task_id)
-
-            tasks[task_id].status = "cancelled"
-            tasks[task_id].error = "cancelled"
-
-        except Exception as e:
-            manager.send_message_threadsafe({
-                "type": "error",
-                "task_id": task_id,
-                "error": str(e)
-            }, task_id)
-
-            tasks[task_id].status = "failed"
-            tasks[task_id].error = str(e)
-
-    thread = threading.Thread(target=task_runner, daemon=True)
-    thread.start()

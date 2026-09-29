@@ -3,10 +3,10 @@ import threading
 import unittest
 from unittest.mock import ANY, MagicMock, patch
 
-import tasks
-from models import RepairRequest, TaskStatus, UpdateRequest
-from sophon_api import compare_game_versions
-from tasks import determine_repair_action, is_predownload_enabled
+import services.operations as tasks
+from api.models import RepairRequest, TaskStatus, UpdateRequest
+from engine.files import compare_game_versions
+from services.operations import determine_repair_action, is_predownload_enabled
 
 
 class GameVersionComparisonTests(unittest.TestCase):

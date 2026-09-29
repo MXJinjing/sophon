@@ -1,6 +1,6 @@
 import time, threading
-from utils import ConnectionManager
-from models import TaskStatus
+from infrastructure.connections import ConnectionManager
+from api.models import TaskStatus
 from typing import Dict, List, Optional
 
 BROADCAST_INTERVAL = 1  # seconds

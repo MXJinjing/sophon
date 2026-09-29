@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 import zstandard
 import manifest_pb2
-import manifest_browser as browser
+import services.manifest_browser as browser
 
 class ManifestBrowserTests(unittest.TestCase):
     def setUp(self):

@@ -10,9 +10,10 @@ import unittest
 from unittest.mock import patch
 
 import zstandard
-import history
+import services.history as history
+import services.manifest_browser as manifest_browser
 import manifest_pb2
-from models import TaskStatus
+from api.models import TaskStatus
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
@@ -69,7 +70,18 @@ class HistoricalFileTests(unittest.TestCase):
         self.tasks = {'test':TaskStatus(task_id='test', status='running')}
         self.query = patch.object(history, 'query_build', side_effect=lambda region, version: copy.deepcopy(self.builds[version]))
         self.query.start()
-        self.progress = patch('progress_handlers.InstallProgressHandler._calculate_speed')
+        # Browsing binds query_build at module import time; mock its own lookup too.
+        browser_query = patch.object(manifest_browser, 'query_build',
+            side_effect=lambda region, version: copy.deepcopy(self.builds[version]))
+        browser_query.start()
+        self.addCleanup(browser_query.stop)
+        cache_environment = patch.dict('os.environ', {
+            'SOPHON_MANIFEST_CACHE': str(Path(self.directory.name) / 'manifest-cache')})
+        cache_environment.start()
+        self.addCleanup(cache_environment.stop)
+        manifest_browser._cache.clear()
+        self.addCleanup(manifest_browser._cache.clear)
+        self.progress = patch('services.progress.InstallProgressHandler._calculate_speed')
         self.progress.start()
 
     def tearDown(self):
@@ -82,7 +94,7 @@ class HistoricalFileTests(unittest.TestCase):
         return history.run_history(self.manager, self.tasks, 'test', mode, payload, threading.Event(), threading.Event())
 
     def test_parallel_files_use_isolated_shared_chunk_caches(self):
-        from sophon_api import SophonClient
+        from engine.client import SophonClient
         content = b'shared-chunk-content'
         compressed = zstandard.ZstdCompressor().compress(content)
         chunk_id = hashlib.md5(compressed).hexdigest()
@@ -111,8 +123,8 @@ class HistoricalFileTests(unittest.TestCase):
         self.assertEqual(history.local_version(self.root),'4.5.0')
 
     def test_worker_failure_stops_peers_without_committing_version(self):
-        from sophon_api import SophonClient
-        from task_errors import TaskCancelledError
+        from engine.client import SophonClient
+        from infrastructure.errors import TaskCancelledError
         barrier = threading.Barrier(2)
         peer_stopped = threading.Event()
         def failing(client,item,**kwargs):
@@ -167,7 +179,7 @@ class HistoricalFileTests(unittest.TestCase):
         self.assertEqual(history.local_version(self.root), '4.5.0')
 
     def test_interrupted_install_resumes_without_false_version(self):
-        from sophon_api import SophonClient
+        from engine.client import SophonClient
         original = SophonClient.download_game_file
         def interrupted(client, item, **kwargs):
             if item.filename == 'data/removed.bin':
@@ -182,7 +194,7 @@ class HistoricalFileTests(unittest.TestCase):
 
     def test_failure_does_not_advance_version(self):
         self.run_operation('install')
-        from sophon_api import SophonClient
+        from engine.client import SophonClient
         with patch.object(SophonClient, 'download_game_file', side_effect=RuntimeError('network failure')):
             with self.assertRaisesRegex(RuntimeError, 'network failure'):
                 self.run_operation('sync', version='5.0.0')
@@ -196,7 +208,7 @@ class HistoricalFileTests(unittest.TestCase):
         self.assertEqual(history.local_version(self.root), '4.5.0')
 
     def test_cancel_before_file_download(self):
-        from task_errors import TaskCancelledError
+        from infrastructure.errors import TaskCancelledError
         payload = history.HistoryRequest(gamedir=str(self.root), version='4.5.0', files=['data/selected.bin'])
         cancel = threading.Event(); cancel.set()
         with self.assertRaises(TaskCancelledError):

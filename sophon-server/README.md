@@ -24,7 +24,7 @@ uv run --project sophon-server --locked python run-server.py
 | SOPHON_MANIFEST_CACHE | files 压缩清单磁盘缓存，默认 ~/.cache/sophon-server/manifests |
 | SOPHON_HPATCHZ | 指定原生 hpatchz/hpatchz.exe，源码运行和打包均支持 |
 | SOPHON_ARCH | 构建架构，默认当前系统规范化架构，x64/arm64 |
-| SOPHON_PYTHON | 构建入口/编译器 Python；设置后该环境须已装 Nuitka 和服务端依赖 |
+| SOPHON_PYTHON | 指定 Nuitka 编译用 Python；设置后该环境须已装 Nuitka 和服务端依赖 |
 
 SOPHON_SERVER_URL 是客户端变量，不改变服务端监听地址。
 
@@ -41,16 +41,16 @@ SOPHON_SERVER_URL 是客户端变量，不改变服务端监听地址。
 
 ## 构建
 
-根目录脚本：
+macOS、Linux 和 Windows PowerShell 均在仓库根目录执行：
 
 ```sh
-./build-sophon.sh
+uv run --project sophon-server --locked python build.py
 uv run --project sophon-server --locked python build.py --platform linux --arch x64 --plan
 uv run --project sophon-server --locked python build.py --platform win32 --arch x64 --plan
 uv run --project sophon-server --locked python build.py --generate-only
 ```
 
-Windows PowerShell 使用 `.\build-sophon.ps1`，或 `uv run --project sophon-server --locked python build.py`。--plan 仅输出配置，不执行交叉编译；实际构建要求系统、架构和 Python 匹配。--generate-only 下载固定 protoc 并生成 src 中的 protobuf 文件，不编译服务端。--hpatchz 可覆盖内置 helper，--python 可选编译器解释器。
+--plan 仅输出配置，不执行交叉编译；实际构建要求系统、架构和 Python 匹配。--generate-only 下载固定 protoc 并生成 src 中的 protobuf 文件，不编译服务端。--hpatchz 可覆盖内置 helper，--python 可选编译器解释器。
 
 protoc 存于根目录 .cache/protoc，产物位于 build/<platform>-<arch>/server.dist，分发时需要整个目录。hpatchz 已内置 Windows x64、Linux x64、macOS arm64/x64，其他架构需自行提供；历史 chunk 接口不依赖 hpatchz，旧 ldiff 接口需要。Windows/Linux 原生构建尚未实际完成验证，仍需编译器和适用的 pycurl/curl 系统依赖。
 
@@ -690,12 +690,12 @@ finally:
 
 ### 8. 相关源码
 
-- `sophon-server/src/server.py`：FastAPI 路由、任务创建和 WebSocket 入口。
-- `sophon-server/src/models.py`：请求和响应模型。
-- `sophon-server/src/tasks.py`：安装、更新、修复和在线版本查询任务。
-- `sophon-server/src/progress_handlers.py`：进度事件结构和发送逻辑。
-- `sophon-server/src/utils.py`：后台线程、消息队列和 WebSocket 连接管理。
-- `sophon-server/src/history.py`：历史清单、指定文件、同步和只检查实现。
+- `sophon-server/src/api/server.py`：FastAPI 路由、任务创建和 WebSocket 入口；根层 `server.py` 负责启动。
+- `sophon-server/src/api/models.py`：请求和响应模型。
+- `sophon-server/src/services/operations.py`：安装、更新、修复和在线版本查询任务。
+- `sophon-server/src/services/progress.py`：进度事件结构和发送逻辑。
+- `sophon-server/src/infrastructure/runner.py` 和 `connections.py`：后台任务线程、消息队列和 WebSocket 连接管理。
+- `sophon-server/src/services/history.py`：历史清单、指定文件、同步和只检查实现。
 - `sophon-client/src/sophon_client/cli.py`：Python CLI 客户端。
 - 原启动器仓库 `src/integrations/sophon.ts`：旧 HTTP/WebSocket 客户端参考。
 
@@ -845,7 +845,7 @@ POST /api/history/<operation>
 - 只能访问上游仍提供清单、chunk 的历史版本。已实际验证 os/cn 4.5.0、5.0.0、5.6.0 的清单和 bb 4.5.0 元数据；os 4.5.0 的一个指定文件已实际下载、校验、检查和修复。当前探测的 os 1.0.0、3.0.0、4.0.0 无可用 Sophon 清单，不提供伪造的成功结果。
 - Linux/Windows 原生构建尚未实际运行；跨平台配置和路径条件通过测试。
 
-实现位于 `sophon-server/src/`：`history.py`、`server.py`、`models.py`、`utils.py`。源码布局和构建入口见根目录 README.md。
+实现位于 `sophon-server/src/`：`api/` 提供路由和请求模型，`services/` 承担任务与版本查询，`engine/` 实现清单、下载、差分更新和修复，`infrastructure/` 提供连接管理、任务线程、限速与平台适配。内部代码和测试直接导入所属模块，不再保留旧模块名转发文件。根层只保留源码运行和 Nuitka 打包入口 `server.py` 及两个 protobuf 生成文件。
 
 父进程监控使用跨平台进程退出方式；macOS 专用内存回收只在 macOS 执行。独立项目目录与构建命令见 README.md。
 

@@ -1,6 +1,6 @@
 import time
 
-from progress_handlers import InstallProgressHandler, UpdateProgressHandler
+from services.progress import InstallProgressHandler, UpdateProgressHandler
 
 
 class RecordingConnectionManager:

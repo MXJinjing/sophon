@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from directory_status import directory_status
-from server import historical_status
+from services.directory_status import directory_status
+from api.server import historical_status
 
 class DirectoryStatusTests(unittest.TestCase):
     def setUp(self):

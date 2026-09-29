@@ -121,7 +121,8 @@ def local_version(root):
 
 
 def prepare_client(root, cache, region, build):
-    from sophon_api import Options, SophonClient
+    from engine.runtime import Options
+    from engine.client import SophonClient
     options = Options()
     options.gamedir = root
     options.game_type = 'hk4e'
@@ -138,7 +139,7 @@ def prepare_client(root, cache, region, build):
 
 def files_info(region, version, category, pattern='*', offset=0, limit=100,
                path=None, recursive=False, refresh=False):
-    from manifest_browser import browse_files
+    from services.manifest_browser import browse_files
     # Preserve old pattern-only API callers while new clients explicitly send path.
     return browse_files(region, version, category, path or '.',
                         pattern if pattern != '*' or path is None else None,
@@ -189,9 +190,10 @@ def write_config(root, region, version):
 
 
 def run_history(manager, tasks, task_id, operation, payload, cancel_event, pause_event):
-    from sophon_api import compare_game_versions, wait_if_paused
-    from progress_handlers import InstallProgressHandler
-    from task_errors import TaskCancelledError
+    from engine.files import compare_game_versions
+    from engine.control import wait_if_paused
+    from services.progress import InstallProgressHandler
+    from infrastructure.errors import TaskCancelledError
     root = Path(payload.gamedir).expanduser().resolve()
     if root == Path(root.anchor) or root == Path.home().resolve():
         raise ValueError('Use a dedicated game directory')

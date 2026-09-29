@@ -9,7 +9,7 @@ import time
 from urllib import request
 import zstandard
 import manifest_pb2
-from history import query_build
+from services.history import query_build
 
 _lock = threading.RLock()
 _cache = OrderedDict()
