@@ -1,4 +1,7 @@
 """Version-pinned hk4e operations, separate from the legacy launcher protocol."""
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+import copy
+import threading
 import configparser
 import fnmatch
 import hashlib
@@ -26,6 +29,7 @@ class HistoryRequest(BaseModel):
     files: list[str] = Field(default_factory=list)
     tempdir: str | None = None
     download_speed_limit: int = Field(default=0, ge=0)
+    download_threads: int = Field(default=8, ge=1, le=64)
     check_mode: Literal['quick', 'reliable'] = 'reliable'
     allow_downgrade: bool = False
 
@@ -132,17 +136,13 @@ def prepare_client(root, cache, region, build):
     return cli
 
 
-def files_info(region, version, category, pattern='*', offset=0, limit=100):
-    import tempfile
-    with tempfile.TemporaryDirectory(prefix='sophon-manifest-') as directory:
-        root = Path(directory)
-        cli = prepare_client(root, root / 'cache', region, query_build(region, version))
-        cli.load_manifest(category)
-        files = [item for item in cli.di_chunks.manifest.files
-                 if item.flags != 64 and fnmatch.fnmatchcase(item.filename, pattern)]
-        return {'version': version, 'region': region, 'category': category, 'total': len(files),
-                'offset': offset, 'files': [{'filename': item.filename, 'size': item.size, 'md5': item.md5}
-                                          for item in files[offset:offset + limit]]}
+def files_info(region, version, category, pattern='*', offset=0, limit=100,
+               path=None, recursive=False, refresh=False):
+    from manifest_browser import browse_files
+    # Preserve old pattern-only API callers while new clients explicitly send path.
+    return browse_files(region, version, category, path or '.',
+                        pattern if pattern != '*' or path is None else None,
+                        offset, limit, recursive or path is None, refresh)
 
 
 def inspect_file(root, item, reliable):
@@ -262,7 +262,7 @@ def run_history(manager, tasks, task_id, operation, payload, cancel_event, pause
     else:
         progress.download_summary(payload.version, total_download, len(planned), categories)
     issues = []
-    completed = []
+    downloads = []
     for index, (category, item, category_json) in enumerate(planned, 1):
         wait_if_paused(pause_event, cancel_event)
         reason = inspect_file(root, item, payload.check_mode == 'reliable')
@@ -274,23 +274,62 @@ def run_history(manager, tasks, task_id, operation, payload, cancel_event, pause
                 'overall_progress': {'checked_files': index, 'total_files': len(planned),
                                      'overall_percent': index / len(planned) * 100}}, task_id)
         if operation != 'check' and (operation != 'repair' or reason):
-            cli.di_chunks.category_json = category_json
-            for attempt in range(3):
-                try:
-                    cli.download_game_file(item, install_progress_handler=progress,
-                                           cancel_event=cancel_event, pause_event=pause_event)
-                    break
-                except TaskCancelledError:
-                    raise
-                except Exception:
-                    if attempt == 2:
-                        raise
+            # Each worker gets independent category metadata and per-file chunk cache.
+            worker = copy.copy(cli)
+            worker.di_chunks = copy.copy(cli.di_chunks)
+            worker.di_chunks.category_json = category_json
+            worker._history_chunk_directory = cache / 'history' / payload.region / payload.version / 'chunks' / hashlib.sha256(item.filename.encode()).hexdigest()
+            downloads.append((worker, item))
+
+    stopped = threading.Event()
+    class WorkerCancellation:
+        def is_set(self):
+            return stopped.is_set() or cancel_event.is_set()
+        def wait(self, timeout=None):
+            deadline = None if timeout is None else time.monotonic() + timeout
+            while not self.is_set():
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0: return False
+                stopped.wait(min(0.05, remaining) if remaining is not None else 0.05)
+            return True
+    worker_cancel = WorkerCancellation()
+    def download(entry):
+        worker, item = entry
+        wait_if_paused(pause_event, worker_cancel)
+        for attempt in range(3):
+            try:
+                worker.download_game_file(item, install_progress_handler=progress,
+                                          cancel_event=worker_cancel, pause_event=pause_event)
+                break
+            except TaskCancelledError:
+                raise
+            except Exception:
+                if attempt == 2: raise
+                wait_if_paused(pause_event, worker_cancel)
+                if worker_cancel.wait(0.5): raise TaskCancelledError('cancelled')
+        post_reason = inspect_file(root, item, True)
+        if post_reason: raise ValueError(f'Post-download check failed: {item.filename}: {post_reason}')
+
+    if downloads:
+        # Bound queued work too; stop peers on failure without marking the user task cancelled.
+        entries = iter(downloads)
+        with ThreadPoolExecutor(max_workers=payload.download_threads) as executor:
+            active = set()
+            try:
+                for _ in range(min(payload.download_threads, len(downloads))):
+                    active.add(executor.submit(download, next(entries)))
+                while active:
                     wait_if_paused(pause_event, cancel_event)
-                    time.sleep(0.5)
-            post_reason = inspect_file(root, item, True)
-            if post_reason:
-                raise ValueError(f'Post-download check failed: {item.filename}: {post_reason}')
-        completed.append(item.filename)
+                    finished, active = wait(active, timeout=0.1, return_when=FIRST_COMPLETED)
+                    for future in finished: future.result()
+                    for _ in finished:
+                        entry = next(entries, None)
+                        if entry is not None: active.add(executor.submit(download, entry))
+            except BaseException:
+                stopped.set()
+                for future in active: future.cancel()
+                raise
+    completed = [item.filename for _, item, _ in planned]
     wait_if_paused(pause_event, cancel_event)
     if operation in {'install', 'sync'}:
         # Delete only files owned by the previous tracked manifest, after new files succeed.

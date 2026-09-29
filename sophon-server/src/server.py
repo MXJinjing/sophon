@@ -95,6 +95,16 @@ async def set_download_speed_limit(request: LimitRequest):
     return {"ok": True}
 
 
+@app.get("/api/history/versions")
+async def historical_versions(region: Literal["os", "cn", "bb"] = "os", refresh: bool = False):
+    import asyncio
+    from version_catalog import available_versions
+    try:
+        return await asyncio.to_thread(available_versions, region, refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.get("/api/history/build")
 async def historical_build(region: Literal["os", "cn", "bb"] = "os", version: str | None = Query(default=None, pattern=r"^\d+\.\d+\.\d+$")):
     # Metadata lookup does not touch the process-global downloader options.
@@ -104,19 +114,30 @@ async def historical_build(region: Literal["os", "cn", "bb"] = "os", version: st
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/history/status")
+async def historical_status(gamedir: str = Query(min_length=1)):
+    from directory_status import directory_status
+    try:
+        return await asyncio.to_thread(directory_status, gamedir)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/history/files")
 async def historical_files(version: str = Query(pattern=r"^\d+\.\d+\.\d+$"),
         region: Literal["os", "cn", "bb"] = "os",
         category: Literal["game", "en-us", "zh-cn", "ja-jp", "ko-kr"] = "game",
-        pattern: str = "*", offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=1000)):
-    if not operation_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Another downloader operation is running")
+        pattern: str = "*", offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=1000),
+        path: str | None = None, recursive: bool = False, refresh: bool = False):
+    # Browsing no longer mutates process-global downloader options; downloads may continue.
     try:
-        return await asyncio.to_thread(files_info, region, version, category, pattern, offset, limit)
+        return await asyncio.to_thread(files_info, region, version, category, pattern, offset, limit, path, recursive, refresh)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    finally:
-        operation_lock.release()
 
 
 @app.post("/api/history/{operation}")
@@ -153,32 +174,31 @@ async def handle_game_operation(task_type: Literal["install", "repair", "update"
 @app.get("/api/tasks/{task_id}/status")
 async def get_task_status(task_id: str) -> TaskStatus:
     if task_id not in tasks:
-        return TaskStatus(
-            task_id = task_id,
-            status = "",
-            error = "Task not found"
-        )
+        raise HTTPException(status_code=404, detail="Task not found")
     return tasks[task_id]
 
 
 @app.delete("/api/tasks/{task_id}")
 async def cancel_task(task_id: str):
-    if task_id in tasks:
-        task_cancel_events[task_id].set()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task_cancel_events[task_id].set()
     return {"message": f"Task {task_id} cancelled"}
 
 
 @app.post("/api/tasks/{task_id}/pause")
 async def pause_task(task_id: str):
-    if task_id in tasks:
-        task_pause_events[task_id].set()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task_pause_events[task_id].set()
     return {"message": f"Task {task_id} paused"}
 
 
 @app.post("/api/tasks/{task_id}/resume")
 async def resume_task(task_id: str):
-    if task_id in tasks:
-        task_pause_events[task_id].clear()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    task_pause_events[task_id].clear()
     return {"message": f"Task {task_id} resumed"}
 
 @app.get("/api/game/online_info")

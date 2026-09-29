@@ -9,10 +9,10 @@ description = "Minimal Python CLI for Sophon game downloads and maintenance"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["rich>=14,<15"]
 
 [project.scripts]
-sophon-client = "sophon_client.cli:main"
+sophon-client = "sophon_client.package_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -81,6 +81,61 @@ class HistoricalFileTests(unittest.TestCase):
         payload = history.HistoryRequest(gamedir=str(self.root), version=version, **extra)
         return history.run_history(self.manager, self.tasks, 'test', mode, payload, threading.Event(), threading.Event())
 
+    def test_parallel_files_use_isolated_shared_chunk_caches(self):
+        from sophon_api import SophonClient
+        content = b'shared-chunk-content'
+        compressed = zstandard.ZstdCompressor().compress(content)
+        chunk_id = hashlib.md5(compressed).hexdigest()
+        (self.assets / chunk_id).write_bytes(compressed)
+        pb = manifest_pb2.Manifest()
+        for filename in ('data/first.bin', 'data/second.bin'):
+            item = pb.files.add(filename=filename,size=len(content),md5=hashlib.md5(content).hexdigest())
+            item.chunks.add(chunk_id=chunk_id,offset=0,compressed_size=len(compressed),uncompressed_size=len(content))
+        manifest_name = 'manifest-parallel-fixture'
+        (self.assets / manifest_name).write_bytes(zstandard.ZstdCompressor().compress(pb.SerializeToString()))
+        build = copy.deepcopy(self.builds['4.5.0'])
+        build['data']['manifests'][0]['manifest']['id'] = manifest_name
+        barrier = threading.Barrier(2)
+        original = SophonClient.download_game_file
+        clients = []
+        def parallel(client,item,**kwargs):
+            clients.append(client)
+            barrier.wait(timeout=5)
+            return original(client,item,**kwargs)
+        with patch.object(history,'query_build',return_value=build),patch.object(SophonClient,'download_game_file',parallel):
+            self.run_operation('install',download_threads=2)
+        self.assertEqual(len({id(client.di_chunks) for client in clients}),2)
+        self.assertEqual(len({client._history_chunk_directory for client in clients}),2)
+        for filename in ('first.bin','second.bin'):
+            self.assertEqual((self.root/'data'/filename).read_bytes(),content)
+        self.assertEqual(history.local_version(self.root),'4.5.0')
+
+    def test_worker_failure_stops_peers_without_committing_version(self):
+        from sophon_api import SophonClient
+        from task_errors import TaskCancelledError
+        barrier = threading.Barrier(2)
+        peer_stopped = threading.Event()
+        def failing(client,item,**kwargs):
+            if not getattr(client, '_fixture_started', False):
+                client._fixture_started = True
+                barrier.wait(timeout=5)
+            if item.filename == 'data/selected.bin':raise RuntimeError('worker failure')
+            self.assertTrue(kwargs['cancel_event'].wait(5))
+            peer_stopped.set()
+            raise TaskCancelledError('peer stopped')
+        with patch.object(SophonClient,'download_game_file',failing):
+            with self.assertRaisesRegex(RuntimeError,'worker failure'):
+                self.run_operation('install',download_threads=2)
+        self.assertTrue(peer_stopped.is_set())
+        self.assertFalse((self.root/'config.ini').exists())
+
+    def test_download_threads_validation(self):
+        from pydantic import ValidationError
+        self.assertEqual(history.HistoryRequest(gamedir=str(self.root),version='4.5.0').download_threads,8)
+        for value in (0,65):
+            with self.assertRaises(ValidationError):
+                history.HistoryRequest(gamedir=str(self.root),version='4.5.0',download_threads=value)
+
     def test_selected_file_only_and_read_only_check(self):
         self.run_operation('download', files=['data/selected.bin'])
         self.assertEqual((self.root / 'data/selected.bin').read_bytes(), b'old-data')

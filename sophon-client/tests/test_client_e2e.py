@@ -46,7 +46,7 @@ def controlled(manager, tasks, task_id, operation, payload, cancel, pause):
 server.run_history = controlled
 uvicorn.run(server.app, host='127.0.0.1', port=PORT, log_level='warning')
 '''.replace('PORT', str(port)))
-        cls.env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT/'sophon-server'/'src'),str(ROOT/'sophon-server'/'tests'),str(ROOT/'sophon-client'/'src')]), PYTHONDONTWRITEBYTECODE='1')
+        cls.env = dict(os.environ, SOPHON_MANIFEST_CACHE=str(cls.base/'manifest-cache'), PYTHONPATH=os.pathsep.join([str(ROOT/'sophon-server'/'src'),str(ROOT/'sophon-server'/'tests'),str(ROOT/'sophon-client'/'src')]), PYTHONDONTWRITEBYTECODE='1')
         cls.log = (cls.base/'server.log').open('w')
         cls.proc = subprocess.Popen([sys.executable,str(runner)], cwd=ROOT/'sophon-server',env=cls.env,stdout=cls.log,stderr=cls.log)
         from urllib.request import urlopen
@@ -74,69 +74,60 @@ uvicorn.run(server.app, host='127.0.0.1', port=PORT, log_level='warning')
     def setUp(self):
         self.work = tempfile.TemporaryDirectory(dir=self.base)
         self.root = Path(self.work.name)
-        self.registry = self.root/'registry.json'
 
     def tearDown(self):
         self.work.cleanup()
 
     def cli(self,*args,code=0):
-        result = subprocess.run([sys.executable,'-m','sophon_client','--server',self.url,'--registry',str(self.registry),'--json',*args],env=self.env,capture_output=True,text=True,timeout=30)
+        result = subprocess.run([sys.executable,'-m','sophon_client','--server',self.url,'--json',*args],env=self.env,capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,code,result.stdout+'\n'+result.stderr)
         return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
-    def test_selected_file_download_check_repair_and_tracking(self):
+    def test_selected_file_download_check_repair(self):
         path=self.root/'selected'
-        self.cli('register','selected',str(path),'--region','os','--version','4.5.0')
-        files=self.cli('files','--version','4.5.0','--pattern','*/selected.*')[0]
+        files=self.cli('files','hk4e_os@4.5.0','--match','*/selected.*')[0]
         self.assertEqual(files['total'],1)
-        self.cli('download','selected','--file','data/selected.bin')
+        response=self.cli('download','hk4e_os@4.5.0','--output',str(path),'data/selected.bin')
         self.assertEqual((path/'data/selected.bin').read_bytes(),b'old-data')
         self.assertFalse((path/'data/removed.bin').exists())
         (path/'data/selected.bin').write_bytes(b'BAD-DATA')
-        checked=self.cli('check','selected','--file','data/selected.bin',code=2)
-        self.assertFalse(checked[-1]['result']['healthy'])
+        self.cli('check','hk4e_os@4.5.0','--dir',str(path),'--file','data/selected.bin',code=2)
         self.assertEqual((path/'data/selected.bin').read_bytes(),b'BAD-DATA')
-        self.cli('repair','selected','--file','data/selected.bin')
+        self.cli('repair','hk4e_os@4.5.0','--dir',str(path),'--file','data/selected.bin')
         self.assertEqual((path/'data/selected.bin').read_bytes(),b'old-data')
-        jobs=self.cli('jobs')[0]
-        task_id=next(iter(jobs))
-        self.cli('status',task_id)
-        self.cli('forget','selected')
-        self.assertTrue((path/'data/selected.bin').exists())
+        self.cli('tasks','status',response[0]['task_id'])
 
     def test_whole_install_sync_and_explicit_downgrade(self):
         path=self.root/'full'
-        self.cli('register','full',str(path),'--region','os','--version','4.5.0')
-        self.cli('install','full')
+        self.cli('install','hk4e_os@4.5.0','--dir',str(path))
         self.assertIn('game_version=4.5.0',(path/'config.ini').read_text())
-        self.cli('update','full','--version','5.0.0')
+        self.cli('update','hk4e_os@5.0.0','--dir',str(path))
         self.assertIn('game_version=5.0.0',(path/'config.ini').read_text())
         self.assertFalse((path/'data/removed.bin').exists())
-        self.cli('sync','full','--version','4.5.0',code=1)
-        self.cli('sync','full','--version','4.5.0','--allow-downgrade')
+        self.cli('update','hk4e_os@4.5.0','--dir',str(path),code=1)
+        self.cli('update','hk4e_os@4.5.0','--dir',str(path),'--allow-downgrade')
         self.assertIn('game_version=4.5.0',(path/'config.ini').read_text())
+        status=self.cli('status','--dir',str(path))[0]
+        self.assertEqual(status['version'],'4.5.0')
+        self.assertEqual(status['integrity'],'not_checked')
 
     def test_errors_are_not_silent_fallbacks(self):
-        version=self.cli('versions','--version','99.99.99',code=1)[0]
-        self.assertFalse(version['available'])
-        self.cli('status','unknown-task',code=1)
-        self.cli('register','test',str(self.root/'files'),'--region','os')
-        self.cli('download','test','--version','4.5.0',code=1)
-        self.cli('download','test','--version','4.5.0','--file','missing',code=1)
+        self.cli('files','hk4e_os@99.99.99',code=1)
+        self.cli('tasks','status','unknown-task',code=1)
+        self.cli('download','hk4e_os@4.5.0','--output',str(self.root/'files'),'missing',code=1)
         self.assertFalse((self.root/'files/data').exists())
 
     def test_detached_pause_resume_cancel_and_busy_guard(self):
-        self.cli('register','control',str(self.root/'control'),'--region','os','--version','4.5.0')
-        task = self.cli('download','control','--file','control-fixture','--detach')[0]['task_id']
+        args=['download','hk4e_os@4.5.0','--output',str(self.root/'control'),'control-fixture','--detach']
+        task=self.cli(*args)[0]['task_id']
         try:
-            self.cli('status',task)
-            self.cli('pause',task)
-            self.cli('resume',task)
-            self.cli('download','control','--file','control-fixture','--detach',code=1)
-            self.cli('cancel',task)
-            self.cli('watch',task,code=130)
-        finally:
-            self.cli('cancel',task)
+            self.cli('tasks','status',task)
+            self.cli('tasks','pause',task)
+            self.cli('tasks','resume',task)
+            self.cli(*args,code=1)
+            self.cli('tasks','cancel',task)
+            self.cli('tasks','watch',task,code=130)
+        finally:self.cli('tasks','cancel',task)
 
     def test_legacy_request_mismatch_and_new_validation(self):
         from urllib.error import HTTPError

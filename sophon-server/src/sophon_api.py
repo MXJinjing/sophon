@@ -915,6 +915,13 @@ class SophonClient:
 		return None
 
 
+	def _chunk_cache_path(self, chunk_id):
+		directory = getattr(self, "_history_chunk_directory", None)
+		if directory is None:
+			return tempdir(chunk_id)
+		directory.mkdir(parents=True, exist_ok=True)
+		return directory / chunk_id
+
 	def remaining_chunk_download_size(self, file_info) -> int:
 		"""Compressed bytes still needed from the network for one file."""
 		filename_safety_check(file_info.filename)
@@ -927,7 +934,7 @@ class SophonClient:
 			return 0
 		remaining = 0
 		for chunk in file_info.chunks:
-			cached = try_get_file_size(tempdir(chunk.chunk_id))
+			cached = try_get_file_size(self._chunk_cache_path(chunk.chunk_id))
 			remaining += chunk.compressed_size - cached if 0 <= cached <= chunk.compressed_size else chunk.compressed_size
 		return remaining
 
@@ -1074,7 +1081,7 @@ class SophonClient:
 				# verification also flushes every decompressed write to disk.
 				for chunk in file_info.chunks:
 					wait_if_paused(pause_event, cancel_event)
-					cfname = tempdir(chunk.chunk_id) # compressed file path
+					cfname = self._chunk_cache_path(chunk.chunk_id) # compressed file path
 
 					if chunk.offset != bytes_written:
 						warnlog("\t Unexpected offset. Seek may fail.")
@@ -1126,7 +1133,7 @@ class SophonClient:
 		else:
 			dstfile.unlink() # delete
 			for chunk in file_info.chunks:
-				tempdir(chunk.chunk_id).unlink(True)
+				self._chunk_cache_path(chunk.chunk_id).unlink(True)
 			abortlog(f"\t File is corrupt after download: {filename.name}. Please retry.")
 
 		if RUN_MEMORY_HACK:
@@ -1134,7 +1141,7 @@ class SophonClient:
 
 		# Remove chunks after downloading
 		for chunk in file_info.chunks:
-			tempdir(chunk.chunk_id).unlink(True)
+			self._chunk_cache_path(chunk.chunk_id).unlink(True)
 
 		# Move the completed files to the game directory
 		if OPT.dry_run:
