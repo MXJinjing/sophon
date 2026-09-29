@@ -27,5 +27,40 @@ class PlatformBuildTests(unittest.TestCase):
                 runtime.memory_relief()
 
 
+    def test_pycurl_openssl_isolation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            wheel = root / 'wheel'
+            dist = root / 'dist'
+            wheel.mkdir()
+            (dist / 'pycurl').mkdir(parents=True)
+            for name in ('libssl.3.dylib', 'libcrypto.3.dylib', 'libcurl.4.8.0.dylib', 'libssh2.1.dylib'):
+                (wheel / name).write_text('wheel ' + name)
+                (dist / name).write_text('original ' + name)
+            extension = dist / 'pycurl' / '_pycurl.so'
+            extension.touch()
+            def output(command, **kwargs):
+                if command[0] != 'otool':
+                    return str(wheel)
+                return command[-1] + ':\n\t@loader_path/libssl.3.dylib (compatibility version 3.0.0)\n\t@loader_path/libcrypto.3.dylib (compatibility version 3.0.0)\n'
+            with patch.object(build.subprocess, 'check_output', side_effect=output), patch.object(build, 'run') as run:
+                build.isolate_pycurl_openssl(dist, ['python'])
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertIn(['install_name_tool', '-change', '@loader_path/libssl.3.dylib',
+                           '@loader_path/../pycurl-libssl.3.dylib', str(extension)], commands)
+            self.assertIn(['install_name_tool', '-change', '@loader_path/libcrypto.3.dylib',
+                           '@loader_path/pycurl-libcrypto.3.dylib', str(dist / 'libssh2.1.dylib')], commands)
+            self.assertIn(['codesign', '--force', '--sign', '-', str(extension)], commands)
+            for name in ('libssl.3.dylib', 'libcrypto.3.dylib'):
+                self.assertEqual((dist / name).read_text(), 'original ' + name)
+                self.assertEqual((dist / ('pycurl-' + name)).read_text(), 'wheel ' + name)
+                self.assertFalse(any(command[-1] == str(dist / name) for command in commands))
+
+    def test_pycurl_missing_wheel_dependency(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(build.subprocess, 'check_output', return_value=temporary):
+            with self.assertRaisesRegex(RuntimeError, 'wheel dependency missing'):
+                build.isolate_pycurl_openssl(temporary, ['python'])
+
+
 if __name__ == '__main__':
     unittest.main()

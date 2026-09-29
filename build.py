@@ -44,6 +44,56 @@ def run(command):
     subprocess.run(command, cwd=ROOT, check=True)
 
 
+
+def isolate_pycurl_openssl(distribution, python_command):
+    """Keep PyCURL's wheel OpenSSL separate from Python's same-named libraries.
+
+    Nuitka flattens dylibs into the distribution directory. PyCURL wheels can
+    require a newer OpenSSL than Python, so their consumers need distinct names.
+    """
+    wheel = Path(subprocess.check_output(
+        [*python_command, '-c',
+         'import pathlib, pycurl; print(pathlib.Path(pycurl.__file__).parent / ".dylibs")'],
+        cwd=ROOT, text=True).strip())
+    names = ('libssl.3.dylib', 'libcrypto.3.dylib')
+    for name in names:
+        if not (wheel / name).is_file():
+            raise RuntimeError(f'PyCURL wheel dependency missing: {wheel / name}')
+    distribution = Path(distribution)
+    isolated = {name: distribution / ('pycurl-' + name) for name in names}
+    for name, destination in isolated.items():
+        shutil.copy2(wheel / name, destination)
+        run(['install_name_tool', '-id', '@loader_path/' + destination.name, str(destination)])
+    # Only PyCURL consumers are rewritten; Python's _ssl keeps its own OpenSSL.
+    consumers = list(isolated.values())
+    for source in wheel.glob('*.dylib'):
+        if source.name not in isolated:
+            bundled = distribution / source.name
+            if not bundled.is_file():
+                raise RuntimeError(f'Bundled PyCURL dependency missing: {bundled}')
+            consumers.append(bundled)
+    extensions = list((distribution / 'pycurl').glob('_pycurl*.so'))
+    if not extensions:
+        raise RuntimeError('Bundled PyCURL extension missing')
+    consumers.extend(extensions)
+    for consumer in consumers:
+        dependencies = subprocess.check_output(['otool', '-L', str(consumer)], text=True)
+        changed = consumer in isolated.values()
+        for line in dependencies.splitlines()[1:]:
+            dependency = line.strip().split(' (', 1)[0]
+            destination = isolated.get(Path(dependency).name)
+            if destination is None:
+                continue
+            # The dylib ID was already changed above; this edits load commands.
+            relative = os.path.relpath(destination, consumer.parent)
+            replacement = '@loader_path/' + relative
+            if dependency != replacement:
+                run(['install_name_tool', '-change', dependency, replacement, str(consumer)])
+                changed = True
+        if changed:
+            run(['codesign', '--force', '--sign', '-', str(consumer)])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--platform', choices=['linux', 'win32', 'darwin'], default=sys.platform)
@@ -82,6 +132,10 @@ def main():
         run(['uv', 'sync', '--project', str(PROJECT), '--locked'])
     os.environ.setdefault('NUITKA_CACHE_DIR', str(ROOT / '.cache'))
     run(config['command'])
+    if sys.platform == 'darwin':
+        python_command = ([config['python']] if config['python'] else
+                          ['uv', 'run', '--project', str(PROJECT), '--locked', 'python'])
+        isolate_pycurl_openssl(config['distribution'], python_command)
     # Executables are copied after compilation, rather than treated as Nuitka data.
     destination = Path(config['distribution']) / ('hpatchz.exe' if sys.platform == 'win32' else 'hpatchz')
     shutil.copy2(patch, destination)
