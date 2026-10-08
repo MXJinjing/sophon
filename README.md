@@ -72,12 +72,12 @@ uv run --project sophon-server --locked python run-server.py
 出现类似以下信息表示启动成功：
 
 ```text
-Uvicorn running on http://127.0.0.1:8000
+Uvicorn running on http://127.0.0.1:18765
 ```
 
-**保持这个终端运行，不要关闭。** 浏览器打开 `http://127.0.0.1:8000/health` 可检查健康响应；`http://127.0.0.1:8000/docs` 可查看 API。
+**保持这个终端运行，不要关闭。** 浏览器打开 `http://127.0.0.1:18765/health` 可检查健康响应；`http://127.0.0.1:18765/docs` 可查看 API。
 
-服务端默认只监听本机 8000 端口。运行服务端不会自动下载游戏，下载由下一步的客户端命令发起。
+服务端默认只监听本机 18765 端口。运行服务端不会自动下载游戏，下载由下一步的客户端命令发起。
 
 ## 4. 终端二：运行客户端
 
@@ -296,7 +296,7 @@ uv run --project sophon-client --locked python run-client.py tasks cancel TASK_I
 uv run --project sophon-client --locked python run-client.py tasks watch TASK_ID
 ```
 
-status/pause/resume/cancel 原样调用服务端接口，保留返回数据。控制消息不代表操作已完成，实际状态用 tasks status 查看。服务端没有“列出全部任务”的接口，客户端也不保存任务 ID。
+status/pause/resume/cancel 原样调用服务端接口，保留返回数据。控制消息不代表操作已完成，实际状态用 tasks status 查看。使用 `tasks list` 列出当前服务端所有任务的名称、ID、状态和启动时间；`--json tasks list` 返回原始 JSON。客户端不保存任务 ID。
 
 普通前台操作按 Ctrl+C 会请求取消任务；tasks watch 按 Ctrl+C 只退出观察，任务继续。后台下载期间不要关闭服务端。服务端重启会中断运行任务并清空任务 ID。
 
@@ -325,18 +325,13 @@ uv run --project sophon-client --locked python run-client.py install hk4e_cn@4.5
 
 ## 13. 修改端口
 
-macOS / Linux 的终端一：
+终端一（macOS / Linux / Windows 通用）：
 
 ```sh
-SOPHON_PORT=9000 uv run --project sophon-server --locked python run-server.py
+uv run --project sophon-server --locked python run-server.py --port 9000
 ```
 
-Windows PowerShell 的终端一：
-
-```powershell
-$env:SOPHON_PORT = "9000"
-uv run --project sophon-server --locked python run-server.py
-```
+`--port` 优先于 `SOPHON_PORT` 环境变量；未指定时使用环境变量或默认端口 18765。端口范围为 1–65535。
 
 终端二：
 

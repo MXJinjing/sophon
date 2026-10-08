@@ -12,14 +12,22 @@ uv sync --project sophon-server --locked --python 3.13
 uv run --project sophon-server --locked python run-server.py
 ```
 
-本组件目录内也可执行 `uv run --locked python src/server.py`。保持服务端终端运行，在另一终端使用客户端。客户端不会启动或关闭服务端。默认 http://127.0.0.1:8000，健康检查 /health，交互 API /docs。更新代码后需等待现有任务结束再重启，任务 ID 不跨重启保留。
+本组件目录内也可执行 `uv run --locked python src/server.py`。保持服务端终端运行，在另一终端使用客户端。客户端不会启动或关闭服务端。默认 http://127.0.0.1:18765，健康检查 /health，交互 API /docs。更新代码后需等待现有任务结束再重启，任务 ID 不跨重启保留。
+
+使用 `--port` 指定端口，例如：
+
+```sh
+uv run --project sophon-server --locked python run-server.py --port 9000
+```
+
+组件入口 `python src/server.py --port 9000` 和打包后的 `server --port 9000` 同样支持该参数。`--port` 优先于 `SOPHON_PORT`；未指定时使用环境变量或默认端口 18765。端口范围为 1–65535。
 
 ## 环境变量
 
 | 变量 | 用途/默认 |
 | --- | --- |
 | SOPHON_HOST | 监听地址，默认 127.0.0.1 |
-| SOPHON_PORT | 端口，默认 8000 |
+| SOPHON_PORT | 端口，默认 18765 |
 | TERMINATE_WITH_PID | 可选，监控进程 PID，目标消失则退出服务 |
 | SOPHON_MANIFEST_CACHE | files 压缩清单磁盘缓存，默认 ~/.cache/sophon-server/manifests |
 | SOPHON_HPATCHZ | 指定原生 hpatchz/hpatchz.exe，源码运行和打包均支持 |
@@ -35,7 +43,7 @@ SOPHON_SERVER_URL 是客户端变量，不改变服务端监听地址。
 - 历史 install/sync/download/repair 默认八个文件并发，download_threads 可设 1..64；每个文件内 chunk 顺序下载。线程隔离分类和文件缓存；失败停止其他线程，不提交完整版本号。
 - check 不下载，大小或大小+MD5 校验。整个目录更新并非原子事务，失败前可能已有部分文件改变。
 - 下载器操作互斥，忙时 409；build、versions、files 查询和任务控制不占下载操作锁。暂停任务仍占下载锁。清单索引使用自己的锁，多个浏览首次加载可能串行，但不会阻塞下载器。
-- 任务只在内存保存，状态、暂停、恢复、取消以及 WebSocket 保持原接口。没有列出全部任务接口。
+- 任务只在内存保存，状态、暂停、恢复、取消以及 WebSocket 保持原接口。可用 `GET /api/tasks` 列出全部任务。
 
 游戏目录 .sophon/state.json 保存完整安装版本、分类、受管文件和未完成目标；单文件下载写 .sophon/download-<region>-<version>.json，不更新完整安装版本。默认下载缓存在 <gamedir>/.tmp，历史缓存按地区、版本和文件隔离。files 的全局清单缓存与任务缓存是两个用途不同的缓存；客户端不维护这些状态。
 
@@ -84,12 +92,12 @@ WebSocket 使用对应的地址：
 ws://127.0.0.1:<port>/ws/<task_id>
 ```
 
-服务端入口为 `sophon-server/src/server.py`，根目录 `run-server.py` 提供启动入口。直接运行时可通过环境变量配置监听地址和端口：
+服务端入口为 `sophon-server/src/server.py`，根目录 `run-server.py` 提供启动入口。直接运行时可通过 `--port <端口>` 配置端口（范围 1–65535），优先于 `SOPHON_PORT` 环境变量。未传入该参数时，使用以下环境变量配置：
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `SOPHON_HOST` | `127.0.0.1` | HTTP/WebSocket 监听地址 |
-| `SOPHON_PORT` | `8000` | 监听端口 |
+| `SOPHON_PORT` | `18765` | 监听端口 |
 | `TERMINATE_WITH_PID` | 未设置 | 父进程退出后终止 Sophon server |
 
 启动器的典型调用顺序如下：
@@ -855,7 +863,7 @@ POST /api/history/<operation>
 
 客户端无本地安装登记或任务记录。使用地区包名 hk4e_cn / hk4e_os / hk4e_bb；安装、检查、修复和同步必须指定游戏目录。list 查询 `/api/history/versions`，默认列出所有已索引并经官方清单确认的版本；索引可能滞后，不能宣称未知版本也已覆盖。status --dir 只读安装目录的 config.ini 和服务端 state.json，不代表完整性验证。
 
-tasks status/pause/resume/cancel 原样映射本文第 3.7–3.10 节的任务状态及控制接口，保留完整服务端返回；tasks watch 轮询状态。没有任务列表 API，因此不提供 tasks list。后台提交需要已运行的服务端，任务 ID 在重启后失效。客户端不会保存 registry.json；服务端自身的游戏目录状态与缓存机制保持不变。CLI 使用说明见 sophon-client/README.md。
+tasks status/pause/resume/cancel 原样映射本文第 3.7–3.10 节的任务状态及控制接口，保留完整服务端返回；tasks watch 轮询状态。tasks list 调用 GET /api/tasks，显示任务名称、ID、状态和启动时间。后台提交需要已运行的服务端，任务 ID 在重启后失效。客户端不会保存 registry.json；服务端自身的游戏目录状态与缓存机制保持不变。CLI 使用说明见 sophon-client/README.md。
 
 #### 13.1 可下载版本目录
 
@@ -888,3 +896,15 @@ GET /api/history/status，必需查询参数 gamedir（非空字符串）。目�
 list 按版本号从新到旧排列，最新版本在最前面（按数字比较，例如 4.10.0 排在 4.9.0 前）。
 
 check/repair 省略 @版本时，先调用服务端 status 获取当前安装版本，再查询最新版并提示是否有更新。check 始终检查当前版本，不更新。repair 在交互终端询问是否先更新，默认否；确认后等待 update 成功，再按最新版 repair（即便 --detach 也必须先等待更新）。更新失败或取消时不提交 repair。非交互或 --json 不询问、不自动更新，继续当前版本。无法查询最新版时提示并继续当前版本；无法识别安装版本则报错，需显式指定 @版本。显式版本不触发此更新询问。
+
+### 任务列表：`GET /api/tasks`
+
+返回当前服务端进程内存中的所有任务，包括 pending、running、paused、completed、failed 和 cancelled，按提交顺序从新到旧排列。无任务时返回 `{"tasks": []}`。服务端重启后清空。
+
+```json
+{"tasks": [{"task_id": "uuid", "task_name": "check hk4e_cn@4.5.0", "status": "running", "started_at": "2026-10-05T00:00:00+00:00"}]}
+```
+
+`task_name` 包含操作及目标（旧任务接口仅包含操作和 game_type）。`started_at` 是任务提交启动时的 UTC ISO 8601 时间；这两个可选字段也加入单任务状态响应，缺少元数据时为 null。列表不包含完整进度和结果，详情使用 `GET /api/tasks/{task_id}/status`。
+
+客户端：`python run-client.py tasks list`，或 `python run-client.py --json tasks list` 输出原始响应。
