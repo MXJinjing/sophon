@@ -22,6 +22,53 @@ class InstallProgressHandler:
         self.file_index_by_name = {}
         self._progress_lock = threading.RLock()
         self.active_files = {}
+        self._processing = None
+        self._processing_broadcast_at = 0
+
+    def processing_start(self, phase: str, filename: str, processed_files: int, total_files: int):
+        """Report local work separately from network byte counters."""
+        now = time.monotonic()
+        changed_phase = self._processing is None or self._processing["phase"] != phase
+        self._processing = {
+            "phase": phase, "filename": filename,
+            "processed_files": processed_files, "total_files": total_files,
+            "current_bytes": 0, "file_bytes": 0, "started_at": now,
+        }
+        self.processing_heartbeat(force=changed_phase)
+
+    def processing_file_bytes(self, current_bytes: int, file_bytes: int):
+        if self._processing is not None:
+            self._processing.update(current_bytes=current_bytes, file_bytes=file_bytes)
+            self.processing_heartbeat()
+
+    def processing_complete(self):
+        if self._processing is not None:
+            self._processing["processed_files"] += 1
+            self._processing.update(current_bytes=0, file_bytes=0)
+            self.processing_heartbeat(
+                force=self._processing["processed_files"] == self._processing["total_files"]
+            )
+
+    def processing_heartbeat(self, force: bool = False):
+        now = time.monotonic()
+        if self._processing is None or (not force and now - self._processing_broadcast_at < BROADCAST_INTERVAL):
+            return
+        self._processing_broadcast_at = now
+        state = self._processing
+        total = state["total_files"]
+        # File counts are authoritative. Hash bytes describe only the current
+        # verification pass, not completion of the whole patch operation.
+        self.conn_manager.send_message_threadsafe({
+            "type": "processing_progress", "task_id": self.task_id,
+            "phase": state["phase"], "filename": state["filename"],
+            "processed_files": state["processed_files"], "total_files": total,
+            "current_bytes": state["current_bytes"], "file_bytes": state["file_bytes"],
+            "elapsed_seconds": int(now - state["started_at"]),
+            "active_files": [],
+            "overall_progress": {
+                "overall_percent": state["processed_files"] / total * 100 if total else 100,
+            },
+        }, self.task_id)
 
     def _active_files_snapshot_locked(self):
         with self._progress_lock:
@@ -415,6 +462,7 @@ class UpdateProgressHandler(InstallProgressHandler):
         }, self.task_id)
 
     def ldiff_patch_start(self, filename: str):
+        self.processing_heartbeat(force=True)
         self.conn_manager.send_message_threadsafe({
             "type": "ldiff_patch_start",
             "task_id": self.task_id,

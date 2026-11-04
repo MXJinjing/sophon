@@ -140,4 +140,3 @@ class ConnectionManager:
         self._stop_event.set()
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5.0)
-

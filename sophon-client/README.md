@@ -121,11 +121,11 @@ uv run --project sophon-client --locked python run-client.py tasks cancel TASK_I
 uv run --project sophon-client --locked python run-client.py tasks watch TASK_ID
 ```
 
-自行保留服务端返回的 task_id，客户端不保存。状态/控制命令原样调用接口，无预检；控制响应不证明任务存在或已完成。服务端没有任务列表接口。任务只保存在服务端内存，重启会中断任务并使 ID 失效。tasks watch 的 Ctrl+C 只退出观察；普通前台下载的 Ctrl+C 请求取消。
+自行保留服务端返回的 task_id，客户端不保存。状态/控制命令原样调用接口，无预检；控制响应不证明任务存在或已完成。可用 tasks list 查看当前服务端的所有任务名称、ID、执行状态和启动时间（UTC，提交时记录，最新任务在前，包含已结束任务）。任务只保存在服务端内存，重启会中断任务并使 ID 失效。交互终端中，前台任务和 tasks watch 均可按 Ctrl+D detach：客户端以退出码 0 退出并显示 task_id，服务端任务继续运行，可用 tasks watch TASK_ID 重新连接。--json 模式输出包含 task_id 和 detached: true 的 JSON。重定向标准输入时不启用此快捷键。先更新再修复的流程若在更新阶段 detach，不会自动提交后续修复；需更新完成后重新运行修复命令。detach 不生成 --output 报告，可随后通过 tasks watch 导出。tasks watch 的 Ctrl+C 只退出观察；普通前台下载的 Ctrl+C 请求取消。
 
 ## 全局选项、环境与退出码
 
---server 和 --json 放在子命令之前。默认服务 http://127.0.0.1:8000，可由 SOPHON_SERVER_URL 覆盖；只接受本机地址，因为路径由服务端本机解释。--server 可覆盖环境变量。没有 --no-start-server；全部请求只连接已有服务端。
+--server 和 --json 放在子命令之前。默认服务 http://127.0.0.1:18765，可由 SOPHON_SERVER_URL 覆盖；只接受本机地址，因为路径由服务端本机解释。--server 可覆盖环境变量。没有 --no-start-server；全部请求只连接已有服务端。
 
 Rich 显示总下载量、速度、剩余时间和最多四个活跃文件；未知速度或总量不伪造 ETA。非交互终端退回文本。成功 0，失败 1，完整性异常 2，取消 130，参数错误 2；tasks status 等请求成功不代表任务成功，应查看返回数据。
 
@@ -145,3 +145,5 @@ list 的 TOTAL (game) 显示游戏本体文件总大小，DOWNLOAD (game) 显示
 list 按版本号从新到旧排列，最新版本在最前面（按数字比较，例如 4.10.0 排在 4.9.0 前）。
 
 check/repair 支持 --output REPORT_FILE，任务结束后将完整状态及所有 result.issues/error 写入客户端本地 JSON 文件（覆盖同名文件）。tasks watch TASK_ID --output REPORT_FILE 可保存已完成任务报告；--detach 需使用该方式随后导出。--json tasks status TASK_ID 查看完整原始结果。download 的 --output OUTPUT_DIR 仍指服务端下载目录。
+
+列出任务：`python run-client.py tasks list`；原始 JSON：`python run-client.py --json tasks list`。

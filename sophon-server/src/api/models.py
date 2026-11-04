@@ -30,6 +30,8 @@ class TaskResponse(BaseModel):
 class TaskStatus(BaseModel):
     task_id: str
     status: str  # running, completed, failed, cancelled, pending
+    task_name: Optional[str] = None
+    started_at: Optional[str] = None
     progress: Optional[float] = None
     result: Optional[Dict[str, Any]] = None
     last_event: Optional[Dict[str, Any]] = None

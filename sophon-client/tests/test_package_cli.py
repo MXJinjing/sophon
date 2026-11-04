@@ -24,6 +24,13 @@ class StatelessClientTests(unittest.TestCase):
         with patch.object(cli.API,'call',side_effect=self.call),patch.object(cli,'watch',return_value=0),contextlib.redirect_stdout(output):
             code=ui.main(list(args))
         return code,output.getvalue()
+    def test_server_address_defaults_and_overrides(self):
+        with patch.dict(ui.os.environ, {}, clear=True):
+            self.assertEqual(ui.parser().parse_args([]).server, 'http://127.0.0.1:18765')
+        with patch.dict(ui.os.environ, {'SOPHON_SERVER_URL': 'http://127.0.0.1:9001'}, clear=True):
+            self.assertEqual(ui.parser().parse_args([]).server, 'http://127.0.0.1:9001')
+            self.assertEqual(ui.parser().parse_args(['--server', 'http://127.0.0.1:9002']).server, 'http://127.0.0.1:9002')
+
     def test_install_direct_request_no_client_state(self):
         self.assertEqual(self.run_cli('install','hk4e_cn@4.5.0','--dir',str(self.root/'game'),'--voice','zh-cn')[0],0)
         body=self.calls[-1][2]

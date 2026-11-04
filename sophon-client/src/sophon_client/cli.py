@@ -1,5 +1,6 @@
 """Stateless HTTP transport, validation and task observation."""
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,55 @@ import time
 from urllib import request, parse, error
 
 TERMINAL = {'completed', 'failed', 'cancelled'}
+
+class TaskDetached(Exception):
+    def __init__(self, task_id):
+        self.task_id = task_id
+
+
+@contextmanager
+def detach_input():
+    """Read Ctrl+D only from a terminal and always restore its settings."""
+    if not sys.stdin.isatty():
+        def wait(timeout):
+            time.sleep(timeout)
+            return False
+        yield wait
+        return
+    if os.name == 'nt':
+        import msvcrt
+        def wait(timeout):
+            deadline = time.monotonic() + timeout
+            while True:
+                if msvcrt.kbhit() and msvcrt.getwch() == '\x04':
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                time.sleep(min(remaining, 0.05))
+        yield wait
+        return
+    import select
+    import termios
+    import tty
+    fd = sys.stdin.fileno()
+    original = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd, termios.TCSANOW)
+        def wait(timeout):
+            deadline = time.monotonic() + timeout
+            while True:
+                ready, _, _ = select.select([fd], [], [], max(0, deadline - time.monotonic()))
+                if not ready:
+                    return False
+                character = os.read(fd, 1)
+                if character == b'\x04':
+                    return True
+                if not character or time.monotonic() >= deadline:
+                    return False
+        yield wait
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, original)
 
 class ClientError(Exception):
     def __init__(self, message, status_code=None):
@@ -64,11 +114,13 @@ def task_status(api, task_id):
 
 def watch(api, task_id, json_mode=False, interval=1, report_path=None):
     from .progress import TaskDisplay
-    with TaskDisplay(json_mode) as display:
-        return _watch(api, task_id, json_mode, interval, display, report_path)
+    if sys.stdin.isatty() and not json_mode:
+        print('Ctrl+D 退出观察，服务端任务继续运行。', flush=True)
+    with detach_input() as wait, TaskDisplay(json_mode) as display:
+        return _watch(api, task_id, json_mode, interval, display, report_path, wait)
 
 
-def _watch(api, task_id, json_mode, interval, display, report_path=None):
+def _watch(api, task_id, json_mode, interval, display, report_path=None, wait=time.sleep):
     previous = None
     while True:
         status = task_status(api, task_id)
@@ -111,7 +163,8 @@ def _watch(api, task_id, json_mode, interval, display, report_path=None):
                 return 1
             result = status.get('result') or {}
             return 2 if result.get('healthy') is False else 0
-        time.sleep(interval)
+        if wait(interval):
+            raise TaskDetached(task_id)
 
 
 def validate_version(text):
@@ -126,5 +179,3 @@ def nonnegative(text):
     if value < 0:
         raise argparse.ArgumentTypeError('must be nonnegative')
     return value
-
-

@@ -77,7 +77,7 @@ class PatchMixin:
 		# reusing a patch, both during pre-download and during the real update.
 		gamefile = gamedir(v.filename)
 		gamefilesize = try_get_file_size(gamefile)
-		md5 = file_md5(gamefile) if gamefilesize >= 0 else None
+		md5 = file_md5(gamefile, progress_callback=progress_handler.processing_file_bytes if progress_handler else None, cancel_event=cancel_event) if gamefilesize >= 0 else None
 		if gamefilesize == v.size and md5 == v.hash:
 			if progress_handler:
 				progress_handler.ldiff_download_skipped(v.filename, "already updated")
@@ -179,7 +179,7 @@ class PatchMixin:
 		# The file may have changed since pre-download or since the diff was
 		# selected. Do not feed such a file to hpatchz.
 		gamefilesize = try_get_file_size(gamefile)
-		md5 = file_md5(gamefile) if gamefilesize >= 0 else None
+		md5 = file_md5(gamefile, progress_callback=progress_handler.processing_file_bytes if progress_handler else None, cancel_event=cancel_event) if gamefilesize >= 0 else None
 		if gamefilesize == v.size and md5 == v.hash:
 			return True
 		if gamefilesize != pinfo.original_size or md5 != pinfo.original_hash:
@@ -201,6 +201,8 @@ class PatchMixin:
 
 		try:
 			raise_if_cancelled(cancel_event)
+			if progress_handler:
+				progress_handler.processing_file_bytes(0, 0)
 			done = runtime.hpatchz_patch_file(
 				gamefile,
 				dstfile,
@@ -208,13 +210,15 @@ class PatchMixin:
 				pinfo.patch_offset,
 				pinfo.patch_length,
 				cancel_event=cancel_event,
+				progress_callback=progress_handler.processing_heartbeat if progress_handler else None,
 			)
 			if not done:
 				done = runtime.hpatchz_patch_file(
 					gamefile, dstfile, ldiffname, pinfo.patch_offset,
 					pinfo.patch_length, 300, cancel_event=cancel_event,
+					progress_callback=progress_handler.processing_heartbeat if progress_handler else None,
 				)
-			if not done or not file_matches(dstfile, v.size, v.hash):
+			if not done or not file_matches(dstfile, v.size, v.hash, progress_callback=progress_handler.processing_file_bytes if progress_handler else None, cancel_event=cancel_event):
 				raise RuntimeError("patched file checksum failed")
 		except TaskCancelledError:
 			dstfile.unlink(True)
@@ -284,6 +288,8 @@ class PatchMixin:
 			# Motivation: less space consumption by temporary files
 
 			wait_if_paused(pause_event, cancel_event)
+			if progress_handler:
+				progress_handler.processing_start("patching", v.filename, files_done, files_total)
 			downloaded = self._download_ldiff_file(
 				ldiff_dir,
 				v,
@@ -318,6 +324,8 @@ class PatchMixin:
 					self._apply_ldiff_file(ldiff_dir, v)
 
 			files_done += 1
+			if progress_handler:
+				progress_handler.processing_complete()
 			relname = pathlib.Path(v.filename).name
 			infolog(f"Progress: {files_done} / {files_total} files | Downloaded: {relname}", end="\r")
 			if files_done % 100 == 0:
@@ -400,5 +408,3 @@ class PatchMixin:
 			if progress_handler:
 				progress_handler.delete_file(filename.name, ldiff=True)
 		infolog(f"Cleaned up {count} now unused ldiff files.")
-
-

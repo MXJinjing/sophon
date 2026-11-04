@@ -28,5 +28,3 @@ def abortlog(*args, **kwargs):
 	print("\033[31mERROR ", *args, "\033[0m", **kwargs)
 	exception_string = " ".join(str(a) for a in args)
 	raise RuntimeError(exception_string)
-
-

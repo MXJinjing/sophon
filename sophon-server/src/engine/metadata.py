@@ -293,5 +293,3 @@ class ManifestMixin:
 
 		warnlog(f"Cannot find chunks for file: {file_name}")
 		return None
-
-

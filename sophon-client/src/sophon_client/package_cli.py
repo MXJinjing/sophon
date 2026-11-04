@@ -38,9 +38,9 @@ def parser():
 客户端不保存安装、任务或文件状态。check/repair 省略版本时从服务端目录状态读取当前版本。
   python3 run-client.py list hk4e_cn
   python3 run-client.py status --dir ./games/cn
-服务端没有列出所有任务的接口；提交后请保留 task_id。
+可用 tasks list 列出服务端内存中的所有任务。
 Windows 将 python3 换成 python；各命令支持 --help。""")
-    p.add_argument('--server',default=os.environ.get('SOPHON_SERVER_URL','http://127.0.0.1:8000'),help='本机服务端地址')
+    p.add_argument('--server',default=os.environ.get('SOPHON_SERVER_URL','http://127.0.0.1:18765'),help='本机服务端地址')
     p.add_argument('--json',action='store_true',help='输出原始 JSON / JSON Lines')
     commands=p.add_subparsers(dest='command')
     def add(name,text):return commands.add_parser(name,help=text,description=text)
@@ -78,6 +78,7 @@ Windows 将 python3 换成 python；各命令支持 --help。""")
     files.add_argument('--count',type=int,default=100,help='每页条数，默认 100，范围 1..1000')
     tasks=add('tasks','直接查询和控制服务端任务，不读取本地记录')
     controls=tasks.add_subparsers(dest='action',required=True)
+    controls.add_parser('list',help='列出服务端所有任务的名称、ID、状态和启动时间')
     for action,text in [('status','GET /api/tasks/{id}/status'),('pause','POST /api/tasks/{id}/pause'),('resume','POST /api/tasks/{id}/resume'),('cancel','DELETE /api/tasks/{id}'),('watch','轮询状态并显示进度，Ctrl+C 只退出观察')]:
         sub=controls.add_parser(action,help=text,description=text);sub.add_argument('task_id',help='服务端返回的 task_id')
         if action=='watch':sub.add_argument('--output',metavar='REPORT_FILE',help='任务结束后保存完整结果到客户端本地 JSON 文件（覆盖同名文件）')
@@ -147,6 +148,19 @@ def run(args):
     if args.command=='tasks':
         # No health preflight, local lookup, or auto-start: forward the exact request.
         api=backend.API(args.server)
+        if args.action=='list':
+            result=api.call('GET','/api/tasks')
+            if args.json:backend.emit(result,True)
+            else:
+                from rich.console import Console
+                from rich.table import Table
+                table=Table('任务名称','任务 ID','执行状态','启动时间')
+                states={'pending':'等待中','running':'处理中','paused':'已暂停','completed':'已完成','failed':'失败','cancelled':'已取消'}
+                for task in result['tasks']:
+                    table.add_row(task.get('task_name') or '未知',task['task_id'],states.get(task['status'],task['status']),task.get('started_at') or '未知')
+                Console().print(table)
+                if not result['tasks']:print('当前服务端没有任务。')
+            return 0
         endpoint='/api/tasks/'+parse.quote(args.task_id,safe='')
         if args.action=='watch':return backend.watch(api,args.task_id,args.json,report_path=args.output)
         method,path={'status':('GET',endpoint+'/status'),'pause':('POST',endpoint+'/pause'),
@@ -254,6 +268,12 @@ def main(argv=None):
     p=parser();args=p.parse_args(argv)
     if args.command is None:p.print_help();return 0
     try:return run(args)
+    except backend.TaskDetached as exc:
+        if args.json:backend.emit({'task_id':exc.task_id,'detached':True},True)
+        else:
+            print(f'已退出观察，服务端任务继续运行。任务 ID：{exc.task_id}')
+            print('查看进度：python run-client.py tasks watch '+exc.task_id)
+        return 0
     except KeyboardInterrupt:return 130
     except (backend.ClientError,OSError,ValueError,KeyError) as exc:
         if args.json:backend.emit({'error':str(exc)},True)

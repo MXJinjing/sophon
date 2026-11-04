@@ -18,17 +18,26 @@ def try_get_file_size(filename: pathlib.Path):
 		return -1
 
 
-def file_md5(filename: pathlib.Path) -> str:
+def file_md5(filename: pathlib.Path, progress_callback=None, cancel_event=None, pause_event=None) -> str:
 	"""Hash large game files without loading them into memory."""
+	from .control import wait_if_paused
 	digest = hashlib.md5()
+	processed = 0
+	total = filename.stat().st_size
+	if progress_callback:
+		progress_callback(0, total)
 	with filename.open("rb") as fh:
 		for block in iter(lambda: fh.read(8 * 1024 * 1024), b""):
+			wait_if_paused(pause_event, cancel_event)
 			digest.update(block)
+			processed += len(block)
+			if progress_callback:
+				progress_callback(processed, total)
 	return digest.hexdigest()
 
 
-def file_matches(filename: pathlib.Path, size: int, md5: str) -> bool:
-	return try_get_file_size(filename) == size and file_md5(filename) == md5
+def file_matches(filename: pathlib.Path, size: int, md5: str, **hash_options) -> bool:
+	return try_get_file_size(filename) == size and file_md5(filename, **hash_options) == md5
 
 
 def filename_safety_check(filename):
@@ -92,5 +101,3 @@ def get_game_version(game_data_dir: pathlib.Path, offset: int = 0x88) -> Optiona
 		str_bytes = view[len_index + 4: len_index + 4 + strlen]
 		str_val = str_bytes.decode('ascii')
 		return str_val.split('_')[0]
-
-

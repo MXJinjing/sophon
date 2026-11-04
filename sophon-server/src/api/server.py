@@ -1,9 +1,10 @@
+import argparse
 import asyncio
 import os
 import uuid
 import threading
 import ssl
-from datetime import datetime
+from datetime import datetime, timezone
 from asyncio import AbstractEventLoop
 from typing import Literal, Union
 
@@ -81,6 +82,8 @@ def run_task(task_type: Literal["install", "repair", "update"], request: Union[I
     tasks[task_id] = TaskStatus(
         task_id=task_id,
         status="pending",
+        task_name=f"{task_type} {request.game_type}",
+        started_at=datetime.now(timezone.utc).isoformat(),
     )
     task_cancel_events[task_id] = threading.Event()
     task_pause_events[task_id] = threading.Event()
@@ -168,7 +171,9 @@ async def historical_operation(operation: Literal["install", "sync", "download",
     task_id = str(uuid.uuid4())
     try:
         limiter.set_rate(payload.download_speed_limit)
-        tasks[task_id] = TaskStatus(task_id=task_id, status="pending")
+        tasks[task_id] = TaskStatus(task_id=task_id, status="pending",
+            task_name=f"{operation} {payload.game_type}_{payload.region}@{payload.version}",
+            started_at=datetime.now(timezone.utc).isoformat())
         task_cancel_events[task_id] = threading.Event()
         task_pause_events[task_id] = threading.Event()
         run_task_in_thread(manager, tasks, task_id, guarded_operation, run_history,
@@ -185,6 +190,15 @@ async def handle_game_operation(task_type: Literal["install", "repair", "update"
     if not isinstance(request, expected):
         raise HTTPException(status_code=422, detail=f"Request fields do not match {task_type}")
     return run_task(task_type, request)
+
+@app.get("/api/tasks")
+async def list_tasks():
+    return {"tasks": [
+        {"task_id": task.task_id, "task_name": task.task_name,
+         "status": task.status, "started_at": task.started_at}
+        for task in reversed(list(tasks.values()))
+    ]}
+
 
 @app.get("/api/tasks/{task_id}/status")
 async def get_task_status(task_id: str) -> TaskStatus:
@@ -281,8 +295,16 @@ def startup_event():
         pid = int(os.environ["TERMINATE_WITH_PID"])
         terminate_with_process(pid)
 
-def main():
+def main(argv=None):
     import uvicorn
-    port = int(os.environ.get("SOPHON_PORT", 8000))
+    parser = argparse.ArgumentParser(description="Run the Sophon server.")
+    parser.add_argument("--port", type=int, help="Listening port (default: SOPHON_PORT or 18765).")
+    args = parser.parse_args(argv)
+    try:
+        port = args.port if args.port is not None else int(os.environ.get("SOPHON_PORT", 18765))
+    except ValueError:
+        parser.error("SOPHON_PORT must be an integer")
+    if not 1 <= port <= 65535:
+        parser.error("port must be between 1 and 65535")
     host = os.environ.get("SOPHON_HOST", "127.0.0.1")
     uvicorn.run(app, host=host, port=port, workers=1)

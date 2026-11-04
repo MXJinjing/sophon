@@ -83,9 +83,8 @@ def perform_install(manager: ConnectionManager, tasks: Dict[str, TaskStatus], ta
     cli.retrieve_API_keys()
 
     cli.load_manifest("game")
-    update_config_ini_version(options.gamedir, cli.di_chunks.getBuild_json["data"]["tag"])
 
-    download_size_total = cli.get_chunk_download_size(False)
+    download_size_total = cli.get_chunk_download_size(False, progress_handler=progress, cancel_event=cancel_event, pause_event=pause_event)
     progress.download_summary(
         game_version=cli.installed_ver,
         download_size=download_size_total,
@@ -107,7 +106,7 @@ def perform_install(manager: ConnectionManager, tasks: Dict[str, TaskStatus], ta
                 err_cnt += 1
                 err_logs.append(str(e))
         if err_cnt == 5:
-            raise Exception(f"Download file {v.name} failed after 3 attempts: {err_logs}")
+            raise Exception(f"Download file {v.filename} failed after 5 attempts: {err_logs}")
 
     # Prioritize downloading essintial files for version & game recognition
     positive_substr = ['globalgamemanagers', 'pkg_version']
@@ -138,6 +137,7 @@ def perform_install(manager: ConnectionManager, tasks: Dict[str, TaskStatus], ta
 
     cli.load_manifest("game")
     cli.update_config_ini_version()
+    update_config_ini_version(options.gamedir, cli.di_chunks.getBuild_json["data"]["tag"])
 
     del cli
     del options

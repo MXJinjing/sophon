@@ -118,7 +118,7 @@ def gamedir(*args: str | PathLike[str]) -> pathlib.Path:
 
 
 def hpatchz_patch_file(oldfile: pathlib.Path, dstfile: pathlib.Path, patchfile: pathlib.Path,
-		p_offset: int, p_len: int, timeout: int = 50, cancel_event = None):
+		p_offset: int, p_len: int, timeout: int = 50, cancel_event = None, progress_callback = None):
 	"""
 	Patches a file, throws an exception upon failure
 	One ldiff file may contain multiple patches, thus the offset
@@ -160,6 +160,8 @@ def hpatchz_patch_file(oldfile: pathlib.Path, dstfile: pathlib.Path, patchfile: 
 				proc.communicate()
 			dstfile.unlink(True)
 			raise TaskCancelledError("cancelled")
+		if progress_callback:
+			progress_callback()
 		remaining = deadline - time.monotonic()
 		if remaining <= 0:
 			proc.terminate()
