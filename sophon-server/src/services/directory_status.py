@@ -48,5 +48,3 @@ def directory_status(directory):
         return result
     except (configparser.Error,UnicodeError,ValueError,AttributeError) as exc:
         raise ValueError(f'无法读取安装信息：{exc}') from exc
-
-

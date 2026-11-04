@@ -2,6 +2,17 @@
 
 独立 FastAPI 服务端，保留 uv + protoc 31.1 + Nuitka 构建方式和旧接口。完整入门顺序见 [根目录 README](../README.md)，完整 API 基准包含在本文下方的 [API 参考](#api-参考)。
 
+## 与启动器同步维护
+
+本仓库维护共享服务端代码；启动器的 `sophon_server/` 继续采用源码复制方式，不使用 Git 子模块。修改共享行为时先在本仓库提交，再从启动器根目录执行：
+
+```sh
+python3 scripts/sync-sophon.py --source ../sophon --check
+python3 scripts/sync-sophon.py --source ../sophon --apply
+```
+
+同步器复制服务端源码、协议、共享测试和许可，并记录本仓库提交及文件校验值。若启动器副本存在尚未回传的修改，会拒绝覆盖。启动器自己的界面、构建适配、依赖配置和 `test_launcher_*.py` 不参与复制；两边 API 文档分别保留运行说明，协议变更须更新两边 API 参考。同步不执行网络拉取、构建或发布。
+
 ## 准备和运行
 
 在仓库根目录：
@@ -642,6 +653,33 @@ ldiff 应用：
 | `ldiff_patch_skipped` | `filename`, `reason` | 跳过补丁 |
 
 ### 6. 最小客户端示例
+
+### 本地文件处理进度
+
+`processing_progress` 是新增、兼容旧客户端的 WebSocket 事件，用于旧安装、更新及修复流程中的本地校验和补丁工作：
+
+```json
+{
+  "type": "processing_progress",
+  "task_id": "task-id",
+  "phase": "calculating_download",
+  "filename": "Data/example.bin",
+  "processed_files": 12,
+  "total_files": 100,
+  "current_bytes": 8388608,
+  "file_bytes": 16777216,
+  "elapsed_seconds": 2,
+  "active_files": [],
+  "overall_progress": { "overall_percent": 12.0 }
+}
+```
+
+- `phase` 为 `patching` 或 `calculating_download`。前者计入本轮全部补丁清单文件（包含跳过或转入分块下载的文件），后者计入待检查的目标文件。
+- `processed_files` 为已处理完的文件数；百分比按文件数计算，不代表网络下载比例，也不代表当前文件已完成补丁。
+- `current_bytes` / `file_bytes` 仅代表当前文件当前一次 MD5 校验的读取字节数；不累计到下载字节，原生补丁执行期间置零。
+- `elapsed_seconds` 是当前文件的处理耗时。校验按读取块上报；原生补丁等待期间定期发送存活进度，事件最多每秒一次，阶段开始和最后一个文件完成立即发送。
+- 完成一个文件后计数递增，包含已存在或无需修改的文件；开始下载后继续使用已有传输事件。
+- 暂停、取消及下载校验规则保持原有接口；大型文件计算下载量时的 MD5 校验也检查暂停和取消。
 
 下面的示例展示一个客户端如何启动安装、连接进度流并处理终止事件：
 

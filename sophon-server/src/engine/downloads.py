@@ -26,15 +26,15 @@ class DownloadMixin:
 		directory.mkdir(parents=True, exist_ok=True)
 		return directory / chunk_id
 
-	def remaining_chunk_download_size(self, file_info) -> int:
+	def remaining_chunk_download_size(self, file_info, **hash_options) -> int:
 		"""Compressed bytes still needed from the network for one file."""
 		filename_safety_check(file_info.filename)
 		if file_info.flags == 64:
 			return 0
 		filename = pathlib.Path(file_info.filename)
-		if file_matches(gamedir(filename), file_info.size, file_info.md5):
+		if file_matches(gamedir(filename), file_info.size, file_info.md5, **hash_options):
 			return 0
-		if file_matches(tempdir("files", filename), file_info.size, file_info.md5):
+		if file_matches(tempdir("files", filename), file_info.size, file_info.md5, **hash_options):
 			return 0
 		remaining = 0
 		for chunk in file_info.chunks:
@@ -42,13 +42,22 @@ class DownloadMixin:
 			remaining += chunk.compressed_size - cached if 0 <= cached <= chunk.compressed_size else chunk.compressed_size
 		return remaining
 
-	def get_chunk_download_size(self, filter_by_new: bool) -> int:
-		"""Count only the bytes absent from staged files and chunk cache."""
-		return sum(
-			self.remaining_chunk_download_size(v)
-			for v in self.di_chunks.manifest.files
-			if not filter_by_new or v.filename in self.new_files_to_download
-		)
+	def get_chunk_download_size(self, filter_by_new: bool, progress_handler=None, cancel_event=None, pause_event=None) -> int:
+		"""Inspect reusable files and report the work before downloading."""
+		files = [v for v in self.di_chunks.manifest.files
+		         if not filter_by_new or v.filename in self.new_files_to_download]
+		total = 0
+		for index, info in enumerate(files):
+			wait_if_paused(pause_event, cancel_event)
+			options = {}
+			if progress_handler:
+				progress_handler.processing_start("calculating_download", info.filename, index, len(files))
+				options = dict(progress_callback=progress_handler.processing_file_bytes,
+				               cancel_event=cancel_event, pause_event=pause_event)
+			total += self.remaining_chunk_download_size(info, **options)
+			if progress_handler:
+				progress_handler.processing_complete()
+		return total
 
 
 	def _download_file_resume(self, url: str, dstfile: pathlib.Path, dstsize: int, cancel_event = None, pause_event = None, progress_callback = None):
@@ -269,7 +278,7 @@ class DownloadMixin:
 			self.new_files_to_download.clear()
 			return
 
-		download_size_total = self.get_chunk_download_size(True)
+		download_size_total = self.get_chunk_download_size(True, progress_handler=progress_handler, cancel_event=cancel_event, pause_event=pause_event)
 		infolog(f"New files to download: {len(self.new_files_to_download)} files\n")
 		infolog(f"Downloading newly added files (up to {bytes_to_MiB(download_size_total)} MiB) ...")
 		if progress_handler:
@@ -315,5 +324,3 @@ class DownloadMixin:
 
 		infolog("Download complete.")
 		self.new_files_to_download.clear()
-
-

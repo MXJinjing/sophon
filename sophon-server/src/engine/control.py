@@ -22,5 +22,3 @@ def wait_if_paused(pause_event, cancel_event=None):
 		raise_if_cancelled(cancel_event)
 		time.sleep(0.2)
 	raise_if_cancelled(cancel_event)
-
-

@@ -336,5 +336,3 @@ class SophonClient(ManifestMixin, DownloadMixin, PatchMixin, RepairMixin):
 
 		confname.write_text(contents)
 		infolog(f"Updated config.ini to {self.installed_ver}")
-
-
