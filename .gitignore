@@ -11,3 +11,7 @@ build/
 dist/
 games/
 *.log
+/sophon-swift/.build*/
+/sophon-swift/.swiftpm/
+/sophon-swift/.testData/
+/sophon-swift/*.profraw
