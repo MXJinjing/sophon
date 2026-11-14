@@ -1,0 +1,23 @@
+name: Swift Sophon Tests
+
+on:
+  pull_request:
+    paths:
+      - "sophon-swift/**"
+      - ".github/workflows/swift-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Swift fixture tests
+        working-directory: sophon-swift
+        run: |
+          export SOPHON_TEST_PRODUCTS="$(swift build --show-bin-path)"
+          swift test --force-resolved-versions -j 6
