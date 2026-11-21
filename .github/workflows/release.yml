@@ -117,9 +117,29 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  swift-cli:
+    name: Swift CLI (darwin-${{ matrix.arch }})
+    needs: test
+    runs-on: macos-26
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Package SophonCLI
+        run: bash .github/scripts/package-swift-cli.sh ${{ matrix.arch }} dist/SophonCLI-darwin-${{ matrix.arch }}.tar.gz
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sophon-cli-darwin-${{ matrix.arch }}
+          path: dist/SophonCLI-darwin-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Publish GitHub Release
-    needs: [test, server, client]
+    needs: [test, server, client, swift-cli]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
