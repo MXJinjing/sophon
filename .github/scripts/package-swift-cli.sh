@@ -34,6 +34,6 @@ install -m 755 "$bin/SophonCLI" "$stage/SophonCLI"
 install -m 644 "$source/LICENSE" "$stage/LICENSE"
 xcrun swift-stdlib-tool --copy --platform macosx \
   --scan-executable "$stage/SophonCLI" --destination "$stage"
-xcrun lipo -verify_arch "$lipo_arch" "$stage/SophonCLI"
+xcrun lipo "$stage/SophonCLI" -verify_arch "$lipo_arch"
 tar -C "$stage" -czf "$archive" .
 echo "$archive"
